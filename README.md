@@ -13,7 +13,7 @@
 ![输入图片说明](doc/img/img1.png)
 
 右下角图标
-![输入图片说明](doc/img/img2.png)
+![输入图片说明](doc/img/image.png)
 
 #### 运行环境
 uv run
