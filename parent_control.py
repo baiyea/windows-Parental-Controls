@@ -1,0 +1,382 @@
+import tkinter as tk
+from tkinter import messagebox
+import time
+import threading
+import sys
+import os
+from datetime import datetime, timedelta
+import pystray
+from PIL import Image, ImageDraw
+import socket
+import atexit
+
+# ============ 单实例锁 ============
+class SingleInstance:
+    def __init__(self, port=37429):
+        self.port = port
+        self.sock = None
+        
+    def try_lock(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.sock.bind(('127.0.0.1', self.port))
+            self.sock.listen(1)
+            atexit.register(self.release)
+            return True
+        except socket.error:
+            self.sock.close()
+            self.sock = None
+            return False
+            
+    def release(self):
+        if self.sock:
+            self.sock.close()
+
+# ============ 全局变量 ============
+g_controller = None
+g_icon = None
+g_config = None
+
+# ============ 加载配置 ============
+def load_config():
+    global g_config
+    try:
+        import json
+        with open('config.json', 'r', encoding='utf-8') as f:
+            g_config = json.load(f)
+    except Exception:
+        g_config = {"password": "1234", "work_minutes": 30, "break_minutes": 5}
+    return g_config
+
+# ============ 锁屏窗口 ============
+class LockScreen:
+    def __init__(self, on_unlock_callback, is_forced=False):
+        self.root = tk.Tk()
+        self.root.attributes('-fullscreen', True, '-topmost', True)
+        self.root.configure(bg='#1a1a2e')
+        self.on_unlock = on_unlock_callback
+        self.is_forced = is_forced  # 是否强制锁屏（用于区分正常休息）
+        
+        self.root.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.root.bind('<Alt-F4>', lambda e: 'break')
+        self.root.bind('<Escape>', lambda e: 'break')
+        
+        frame = tk.Frame(self.root, bg='#1a1a2e')
+        frame.place(relx=0.5, rely=0.5, anchor='center')
+        
+        title = "🔒 强制锁屏" if is_forced else "⏰ 休息时间到！"
+        tk.Label(frame, text=title, font=('Microsoft YaHei', 48, 'bold'), 
+                fg='#e94560', bg='#1a1a2e').pack(pady=20)
+        
+        if is_forced:
+            tk.Label(frame, text="家长强制锁定", 
+                    font=('Microsoft YaHei', 20), fg='#ffd700', bg='#1a1a2e').pack()
+        
+        self.time_label = tk.Label(frame, text="休息倒计时: 30:00", 
+                                  font=('Microsoft YaHei', 20), fg='#4ecca3', bg='#1a1a2e')
+        self.time_label.pack(pady=10)
+        
+        pwd_frame = tk.Frame(frame, bg='#1a1a2e')
+        pwd_frame.pack(pady=30)
+        
+        tk.Label(pwd_frame, text="输入密码解锁:", font=('Microsoft YaHei', 16), 
+                fg='#eaeaea', bg='#1a1a2e').pack(side='left', padx=10)
+        
+        self.pwd_entry = tk.Entry(pwd_frame, show='●', font=('Arial', 16), width=15)
+        self.pwd_entry.pack(side='left')
+        self.pwd_entry.bind('<Return>', lambda e: self.check_password())
+        self.pwd_entry.focus()
+        
+        tk.Button(pwd_frame, text="解锁", command=self.check_password,
+                 font=('Microsoft YaHei', 12), bg='#e94560', fg='white',
+                 padx=20, pady=5).pack(side='left', padx=10)
+        
+        # 休息时间从配置读取
+        self.remaining = g_config.get("break_minutes", 5) * 60
+        self.update_timer()
+        
+    def update_timer(self):
+        mins, secs = divmod(self.remaining, 60)
+        self.time_label.config(text=f"休息倒计时: {mins:02d}:{secs:02d}")
+        if self.remaining > 0:
+            self.remaining -= 1
+            self.root.after(1000, self.update_timer)
+        else:
+            self.time_label.config(text="✓ 休息完成！", fg='#4ecca3')
+            # 自动解锁
+            self.root.after(1000, self.auto_unlock)
+
+    def auto_unlock(self):
+        """倒计时结束后自动解锁"""
+        self.root.destroy()
+        if self.on_unlock:
+            self.on_unlock()
+            
+    def check_password(self):
+        if self.pwd_entry.get() == g_config.get("password", "1234"):
+            self.root.destroy()
+            self.on_unlock()
+        else:
+            messagebox.showerror("错误", "密码错误！", parent=self.root)
+            self.pwd_entry.delete(0, 'end')
+            
+    def run(self):
+        self.root.mainloop()
+
+# ============ 退出验证窗口 ============
+class ExitConfirm:
+    """退出前密码验证"""
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("验证")
+        self.root.geometry("300x150")
+        self.root.resizable(False, False)
+        self.root.attributes('-topmost', True)
+        self.root.configure(bg='#2d2d44')
+        
+        self.result = False
+        
+        tk.Label(self.root, text="输入密码退出程序:", 
+                font=('Microsoft YaHei', 12), fg='white', bg='#2d2d44').pack(pady=15)
+        
+        self.pwd_entry = tk.Entry(self.root, show='●', font=('Arial', 12), width=20)
+        self.pwd_entry.pack()
+        self.pwd_entry.bind('<Return>', lambda e: self.check())
+        self.pwd_entry.focus()
+        
+        btn_frame = tk.Frame(self.root, bg='#2d2d44')
+        btn_frame.pack(pady=15)
+        
+        tk.Button(btn_frame, text="确认", command=self.check,
+                 bg='#e94560', fg='white', width=8).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="取消", command=self.cancel,
+                 bg='#666', fg='white', width=8).pack(side='left', padx=5)
+        
+    def check(self):
+        if self.pwd_entry.get() == g_config.get("password", "1234"):
+            self.result = True
+            self.root.destroy()
+        else:
+            messagebox.showerror("错误", "密码错误！", parent=self.root)
+            self.pwd_entry.delete(0, 'end')
+            
+    def cancel(self):
+        self.root.destroy()
+        
+    def run(self):
+        self.root.mainloop()
+        return self.result
+
+# ============ 托盘图标 ============
+def create_tray_image():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        dc = ImageDraw.Draw(img)
+        dc.ellipse([2, 2, 62, 62], fill='#e94560', outline='#ff6b6b', width=2)
+        dc.rectangle([30, 10, 34, 34], fill='white')
+        dc.rectangle([30, 30, 48, 34], fill='white')
+        dc.ellipse([26, 26, 38, 38], fill='white')
+        return img
+
+def on_tray_clicked(icon, item):
+    """托盘菜单点击处理"""
+    global g_controller
+    text = str(item)
+
+    if text == "🔒 立即锁屏" and g_controller:
+        g_controller.force_lock()
+        
+    elif text == "🚪 退出":
+        # 先验证密码
+        if g_controller and g_controller.confirm_exit():
+            icon.stop()
+            if g_controller:
+                g_controller.running = False
+            os._exit(0)
+
+def get_tray_menu():
+    global g_controller
+    if not g_controller:
+        return pystray.Menu(
+            pystray.MenuItem("启动中...", lambda icon, item: None, enabled=False),
+            pystray.MenuItem("退出", on_tray_clicked),
+        )
+
+    return pystray.Menu(
+        pystray.MenuItem(
+            f"⏱ {g_controller.get_remaining_time()}",
+            lambda icon, item: None, enabled=False
+        ),
+        pystray.MenuItem("🔒 立即锁屏", on_tray_clicked, enabled=not g_controller.lock_manager.lock_screen),
+        pystray.MenuItem("🚪 退出", on_tray_clicked),
+    )
+
+# ============ 锁屏管理 ============
+class LockScreenManager:
+    """在独立线程中管理锁屏"""
+    def __init__(self):
+        self.lock_screen = None
+        self.on_unlock_callback = None
+
+    def show_lock(self, forced=False):
+        """在新线程中显示锁屏"""
+        if self.lock_screen:
+            return
+        self.lock_screen = LockScreen(self.on_break_complete, is_forced=forced)
+        self.lock_screen.run()
+
+    def on_break_complete(self):
+        """解锁回调"""
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 解锁")
+        self.lock_screen = None
+        if self.on_unlock_callback:
+            self.on_unlock_callback()
+
+# ============ 主控制器 ============
+class ParentControl:
+    def __init__(self):
+        global g_controller
+        g_controller = self
+
+        self.running = True
+        self.work_end_time = None
+        self.lock_manager = LockScreenManager()
+        self.force_lock_flag = threading.Event()
+
+    def get_remaining_time(self):
+        if self.lock_manager.lock_screen:
+            return "休息中"
+        if not self.work_end_time:
+            return "00:00"
+        remaining = self.work_end_time - datetime.now()
+        if remaining.total_seconds() <= 0:
+            return "00:00"
+        mins, secs = divmod(int(remaining.total_seconds()), 60)
+        return f"{mins:02d}:{secs:02d}"
+
+    def start(self):
+        work_minutes = g_config.get("work_minutes", 30)
+        self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 启动，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+
+        # 设置解锁回调
+        self.lock_manager.on_unlock_callback = self.on_break_complete
+
+        # 启动后台线程
+        threading.Thread(target=self.monitor_loop, daemon=True).start()
+        threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+
+        # 主线程运行托盘
+        global g_icon
+        g_icon = pystray.Icon(
+            "ParentControl",
+            create_tray_image(),
+            "家长控制 - 运行中",
+            get_tray_menu(),
+        )
+
+        g_icon.run(self.on_tray_ready)
+
+    def on_tray_ready(self, icon):
+        global g_icon
+        g_icon = icon
+        icon.visible = True
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 托盘已激活")
+
+    def refresh_tray_loop(self):
+        global g_icon
+        while self.running:
+            time.sleep(5)
+            if g_icon and self.running:
+                try:
+                    g_icon.menu = get_tray_menu()
+                    g_icon.title = f"家长控制 - {self.get_remaining_time()}"
+                except Exception as e:
+                    print(f"刷新失败: {e}")
+
+    def monitor_loop(self):
+        """监控循环 - 同时检测时间和强制锁屏信号"""
+        while self.running:
+            # 检查强制锁屏信号
+            if self.force_lock_flag.is_set() and not self.lock_manager.lock_screen:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 执行强制锁屏")
+                self.force_lock_flag.clear()
+                threading.Thread(target=self.lock_manager.show_lock, args=(True,), daemon=True).start()
+                time.sleep(2)
+                continue
+
+            # 检查正常时间到
+            now = datetime.now()
+            if now >= self.work_end_time and not self.lock_manager.lock_screen:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 时间到，锁屏")
+                threading.Thread(target=self.lock_manager.show_lock, args=(False,), daemon=True).start()
+                time.sleep(2)
+
+            time.sleep(1)
+
+    def on_break_complete(self):
+        """休息完成，重新计时"""
+        work_minutes = g_config.get("work_minutes", 30)
+        self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 重新计时，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+
+    def force_lock(self):
+        """触发强制锁屏（线程安全）"""
+        if not self.lock_manager.lock_screen:
+            self.force_lock_flag.set()
+
+    def confirm_exit(self):
+        """退出验证"""
+        # 如果正在锁屏，直接拒绝退出
+        if self.lock_manager.lock_screen:
+            messagebox.showwarning("提示", "休息期间不能退出程序！")
+            return False
+        # 显示密码验证窗口
+        return ExitConfirm().run()
+
+    def exit_app(self):
+        self.running = False
+        global g_icon
+        if g_icon:
+            g_icon.stop()
+
+# ============ 开机启动 ============
+def add_to_startup():
+    import winreg as reg
+    try:
+        exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER, 
+                         r"Software\Microsoft\Windows\CurrentVersion\Run", 
+                         0, reg.KEY_WRITE)
+        reg.SetValueEx(key, "ParentControl", 0, reg.REG_SZ, f'"{exe_path}"')
+        reg.CloseKey(key)
+        print("✓ 已添加开机启动")
+        return True
+    except Exception as e:
+        print(f"✗ 失败: {e}")
+        return False
+
+# ============ 主入口 ============
+if __name__ == "__main__":
+    load_config()  # 加载配置
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--install', action='store_true')
+    args = parser.parse_args()
+    
+    if args.install:
+        add_to_startup()
+        sys.exit(0)
+    
+    locker = SingleInstance()
+    if not locker.try_lock():
+        print("程序已在运行")
+        tk.Tk().withdraw()
+        messagebox.showinfo("家长控制", "程序已经在运行！")
+        sys.exit(0)
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 家长控制启动...")
+    app = ParentControl()
+    app.start()
