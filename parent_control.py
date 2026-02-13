@@ -40,12 +40,28 @@ g_config = None
 # ============ 加载配置 ============
 def load_config():
     global g_config
+    config_path = 'config.json'
+    default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30}
+
+    # 如果配置文件不存在，创建默认配置
+    if not os.path.exists(config_path):
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(default_config, f, ensure_ascii=False, indent=4)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建默认配置文件: {config_path}")
+        except Exception as e:
+            print(f"创建配置文件失败: {e}")
+
+    # 加载配置
     try:
         import json
-        with open('config.json', 'r', encoding='utf-8') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             g_config = json.load(f)
-    except Exception:
-        g_config = {"password": "1234", "work_minutes": 30, "break_minutes": 5}
+    except Exception as e:
+        print(f"加载配置失败: {e}, 使用默认配置")
+        g_config = default_config
+
     return g_config
 
 # ============ 锁屏窗口 ============
