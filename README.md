@@ -12,6 +12,9 @@
 
 ![输入图片说明](img2c51c6fd4bb9eb350794f57da19e8c33.png)
 
+右下角图标
+![输入图片说明](imgimage.png)
+
 #### 运行环境
 uv run
 
