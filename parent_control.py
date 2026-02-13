@@ -167,6 +167,45 @@ class ExitConfirm:
         self.root.mainloop()
         return self.result
 
+# ============ 通用密码验证窗口 ============
+class PasswordConfirm:
+    """通用密码验证窗口"""
+    def __init__(self, title="验证"):
+        self.root = tk.Tk()
+        self.root.title(title)
+        self.root.geometry("300x120")
+        self.root.resizable(False, False)
+        self.root.attributes('-topmost', True)
+        self.root.configure(bg='#2d2d44')
+
+        self.result = False
+
+        tk.Label(self.root, text="输入密码确认操作:",
+                font=('Microsoft YaHei', 12), fg='white', bg='#2d2d44').pack(pady=15)
+
+        self.pwd_entry = tk.Entry(self.root, show='●', font=('Arial', 12), width=20)
+        self.pwd_entry.pack()
+        self.pwd_entry.bind('<Return>', lambda e: self.check())
+        self.pwd_entry.focus()
+
+        btn_frame = tk.Frame(self.root, bg='#2d2d44')
+        btn_frame.pack(pady=10)
+
+        tk.Button(btn_frame, text="确认", command=self.check,
+                 bg='#4ecca3', fg='white', width=8).pack()
+
+    def check(self):
+        if self.pwd_entry.get() == g_config.get("password", "1234"):
+            self.result = True
+            self.root.destroy()
+        else:
+            messagebox.showerror("错误", "密码错误！", parent=self.root)
+            self.pwd_entry.delete(0, 'end')
+
+    def run(self):
+        self.root.mainloop()
+        return self.result
+
 # ============ 托盘图标 ============
 def create_tray_image():
     import warnings
@@ -187,7 +226,7 @@ def on_tray_clicked(icon, item):
 
     if text == "🔒 立即锁屏" and g_controller:
         g_controller.force_lock()
-        
+
     elif text == "🚪 退出":
         # 先验证密码
         if g_controller and g_controller.confirm_exit():
@@ -195,6 +234,14 @@ def on_tray_clicked(icon, item):
             if g_controller:
                 g_controller.running = False
             os._exit(0)
+
+    elif "开机启动" in text:
+        # 弹出密码验证窗口
+        if PasswordConfirm("开机启动").run():
+            _, new_state = toggle_startup()
+            # 刷新托盘菜单显示新状态
+            g_controller.refresh_tray_menu()
+        return
 
 def get_tray_menu():
     global g_controller
@@ -204,12 +251,17 @@ def get_tray_menu():
             pystray.MenuItem("退出", on_tray_clicked),
         )
 
+    # 检查开机启动状态
+    startup_status = "✓ 开机启动" if is_in_startup() else "✗ 开机启动"
+
     return pystray.Menu(
         pystray.MenuItem(
             f"⏱ {g_controller.get_remaining_time()}",
             lambda icon, item: None, enabled=False
         ),
         pystray.MenuItem("🔒 立即锁屏", on_tray_clicked, enabled=not g_controller.lock_manager.lock_screen),
+        pystray.MenuItem("─", lambda icon, item: None, enabled=False),
+        pystray.MenuItem(startup_status, on_tray_clicked),
         pystray.MenuItem("🚪 退出", on_tray_clicked),
     )
 
@@ -342,21 +394,68 @@ class ParentControl:
         if g_icon:
             g_icon.stop()
 
+    def refresh_tray_menu(self):
+        """刷新托盘菜单"""
+        global g_icon
+        if g_icon:
+            g_icon.menu = get_tray_menu()
+
 # ============ 开机启动 ============
-def add_to_startup():
+def get_exe_path():
+    """获取程序路径"""
+    return sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
+
+def is_in_startup():
+    """检查是否已设置开机启动"""
     import winreg as reg
     try:
-        exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
-        key = reg.OpenKey(reg.HKEY_CURRENT_USER, 
-                         r"Software\Microsoft\Windows\CurrentVersion\Run", 
-                         0, reg.KEY_WRITE)
-        reg.SetValueEx(key, "ParentControl", 0, reg.REG_SZ, f'"{exe_path}"')
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER,
+                         r"Software\Microsoft\Windows\CurrentVersion\Run",
+                         0, reg.KEY_READ)
+        value, _ = reg.QueryValueEx(key, "ParentControl")
         reg.CloseKey(key)
-        print("✓ 已添加开机启动")
+        return value == f'"{get_exe_path()}"'
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+def add_to_startup():
+    """添加开机启动"""
+    import winreg as reg
+    try:
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER,
+                         r"Software\Microsoft\Windows\CurrentVersion\Run",
+                         0, reg.KEY_WRITE)
+        reg.SetValueEx(key, "ParentControl", 0, reg.REG_SZ, f'"{get_exe_path()}"')
+        reg.CloseKey(key)
         return True
     except Exception as e:
-        print(f"✗ 失败: {e}")
+        print(f"✗ 添加开机启动失败: {e}")
         return False
+
+def remove_from_startup():
+    """移除开机启动"""
+    import winreg as reg
+    try:
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER,
+                         r"Software\Microsoft\Windows\CurrentVersion\Run",
+                         0, reg.KEY_WRITE)
+        reg.DeleteValue(key, "ParentControl")
+        reg.CloseKey(key)
+        return True
+    except FileNotFoundError:
+        return True
+    except Exception as e:
+        print(f"✗ 移除开机启动失败: {e}")
+        return False
+
+def toggle_startup():
+    """切换开机启动状态，返回新状态"""
+    if is_in_startup():
+        return (remove_from_startup(), False)
+    else:
+        return (add_to_startup(), True)
 
 # ============ 主入口 ============
 if __name__ == "__main__":
