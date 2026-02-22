@@ -37,11 +37,21 @@ g_controller = None
 g_icon = None
 g_config = None
 
+def get_config_path():
+    """获取配置文件路径（使用程序所在目录）"""
+    if getattr(sys, 'frozen', False):
+        # 打包成 exe 时，使用 exe 所在目录
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # 开发时，使用脚本所在目录
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, 'config.json')
+
 # ============ 加载配置 ============
 def load_config():
     global g_config
-    config_path = 'config.json'
-    default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30}
+    config_path = get_config_path()
+    default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30, "work_end_time": None}
 
     # 如果配置文件不存在，创建默认配置
     if not os.path.exists(config_path):
@@ -62,7 +72,24 @@ def load_config():
         print(f"加载配置失败: {e}, 使用默认配置")
         g_config = default_config
 
+    # 确保 work_end_time 字段存在
+    if "work_end_time" not in g_config:
+        g_config["work_end_time"] = None
+
     return g_config
+
+
+def save_config():
+    """保存当前配置到 config.json"""
+    global g_config
+    config_path = get_config_path()
+    try:
+        import json
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(g_config, f, ensure_ascii=False, indent=4)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 配置已保存")
+    except Exception as e:
+        print(f"保存配置失败: {e}")
 
 # ============ 锁屏窗口 ============
 class LockScreen:
@@ -325,9 +352,36 @@ class ParentControl:
         return f"{mins:02d}:{secs:02d}"
 
     def start(self):
-        work_minutes = g_config.get("work_minutes", 30)
-        self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 启动，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+        # 尝试从配置中恢复工作结束时间
+        saved_end_time = g_config.get("work_end_time")
+        if saved_end_time:
+            try:
+                saved_time = datetime.strptime(saved_end_time, '%Y-%m-%d %H:%M:%S')
+                # 如果保存的时间在未来，则继续使用
+                if saved_time > datetime.now():
+                    self.work_end_time = saved_time
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 恢复计时，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+                else:
+                    # 时间已过期，创建新的计时
+                    work_minutes = g_config.get("work_minutes", 30)
+                    self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+                    g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
+                    save_config()
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 启动，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+            except (ValueError, TypeError):
+                # 解析失败，创建新的计时
+                work_minutes = g_config.get("work_minutes", 30)
+                self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+                g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
+                save_config()
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 启动，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
+        else:
+            # 没有保存的时间，创建新的计时
+            work_minutes = g_config.get("work_minutes", 30)
+            self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+            g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
+            save_config()
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 启动，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
 
         # 设置解锁回调
         self.lock_manager.on_unlock_callback = self.on_break_complete
@@ -356,7 +410,7 @@ class ParentControl:
     def refresh_tray_loop(self):
         global g_icon
         while self.running:
-            time.sleep(5)
+            time.sleep(1)
             if g_icon and self.running:
                 try:
                     g_icon.menu = get_tray_menu()
@@ -388,6 +442,8 @@ class ParentControl:
         """休息完成，重新计时"""
         work_minutes = g_config.get("work_minutes", 30)
         self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+        g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
+        save_config()
         print(f"[{datetime.now().strftime('%H:%M:%S')}] 重新计时，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
 
     def force_lock(self):
