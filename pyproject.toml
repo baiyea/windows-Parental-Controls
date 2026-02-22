@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pillow>=12.1.1",
+    "plyer>=2.1.0",
     "pyinstaller>=6.18.0",
     "pystray>=0.19.5",
     "ruff>=0.15.0",

@@ -9,6 +9,8 @@ import pystray
 from PIL import Image, ImageDraw
 import socket
 import atexit
+from plyer import notification
+import winsound
 
 # ============ 单实例锁 ============
 class SingleInstance:
@@ -51,7 +53,7 @@ def get_config_path():
 def load_config():
     global g_config
     config_path = get_config_path()
-    default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30, "work_end_time": None}
+    default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30, "work_end_time": None, "remind_before_minutes": 5}
 
     # 如果配置文件不存在，创建默认配置
     if not os.path.exists(config_path):
@@ -339,6 +341,8 @@ class ParentControl:
         self.work_end_time = None
         self.lock_manager = LockScreenManager()
         self.force_lock_flag = threading.Event()
+        self.remind_shown = False
+        # 使用 plyer 发送通知
 
     def get_remaining_time(self):
         if self.lock_manager.lock_screen:
@@ -352,6 +356,8 @@ class ParentControl:
         return f"{mins:02d}:{secs:02d}"
 
     def start(self):
+        # 重置提醒状态
+        self.remind_shown = False
         # 尝试从配置中恢复工作结束时间
         saved_end_time = g_config.get("work_end_time")
         if saved_end_time:
@@ -429,10 +435,30 @@ class ParentControl:
                 time.sleep(2)
                 continue
 
+            # 检查提前提醒
+            if self.work_end_time and not self.lock_manager.lock_screen:
+                remaining = self.work_end_time - datetime.now()
+                remaining_minutes = remaining.total_seconds() / 60
+                remind_before_minutes = g_config.get("remind_before_minutes", 5)
+
+                if 0 < remaining_minutes <= remind_before_minutes and not self.remind_shown:
+                    self.remind_shown = True
+                    try:
+                        notification.notify(
+                            title="家长控制提醒",
+                            message=f"距离锁屏还剩 {int(remaining_minutes)} 分钟，请保存工作！",
+                            timeout=5
+                        )
+                        winsound.PlaySound(r"C:\Windows\Media\Ring04.wav", winsound.SND_FILENAME)
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 已发送提前提醒")
+                    except Exception as e:
+                        print(f"发送提醒失败: {e}")
+
             # 检查正常时间到
             now = datetime.now()
             if now >= self.work_end_time and not self.lock_manager.lock_screen:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] 时间到，锁屏")
+                winsound.PlaySound(r"C:\Windows\Media\Ring04.wav", winsound.SND_FILENAME)
                 threading.Thread(target=self.lock_manager.show_lock, args=(False,), daemon=True).start()
                 time.sleep(2)
 
@@ -443,6 +469,7 @@ class ParentControl:
         work_minutes = g_config.get("work_minutes", 30)
         self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
         g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
+        self.remind_shown = False
         save_config()
         print(f"[{datetime.now().strftime('%H:%M:%S')}] 重新计时，可用至 {self.work_end_time.strftime('%H:%M:%S')}")
 
