@@ -20,12 +20,13 @@ uv add pystray pillow pyinstaller -v
 # 清理
 rm -rf build dist *.spec
 
-# 打包（包含隐藏导入）
+# 打包（包含音频文件和隐藏导入）
 echo -e "${YELLOW}打包中...${NC}"
 uv run pyinstaller \
     --onefile \
     --noconsole \
     --name ParentControl \
+    --add-data "Ring04.wav;." \
     --hidden-import=pystray \
     --hidden-import=PIL \
     --hidden-import=PIL._imagingtk \

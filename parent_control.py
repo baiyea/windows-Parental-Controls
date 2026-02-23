@@ -12,6 +12,21 @@ import atexit
 from plyer import notification
 import winsound
 
+
+def get_audio_path():
+    """获取音频文件路径，优先使用打包后的音频"""
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的临时目录
+        path = os.path.join(sys._MEIPASS, 'Ring04.wav')
+        if os.path.exists(path):
+            return path
+    # 回退到当前目录或系统默认
+    local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Ring04.wav')
+    if os.path.exists(local_path):
+        return local_path
+    return r"C:\Windows\Media\Ring04.wav"
+
+
 # ============ 单实例锁 ============
 class SingleInstance:
     def __init__(self, port=37429):
@@ -47,7 +62,22 @@ def get_config_path():
     else:
         # 开发时，使用脚本所在目录
         base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, 'config.json')
+    config_path = os.path.join(base_dir, 'config.json')
+
+    # 写日志到文件
+    log_path = os.path.join(base_dir, 'parent_control.log')
+    try:
+        with open(log_path, 'a', encoding='utf-8') as log:
+            log.write(f"[DEBUG] 配置文件路径: {config_path}\n")
+            log.write(f"[DEBUG] exe所在目录: {base_dir}\n")
+            log.write(f"[DEBUG] sys.frozen: {getattr(sys, 'frozen', False)}\n")
+    except:
+        pass
+
+    print(f"[DEBUG] 配置文件路径: {config_path}")
+    print(f"[DEBUG] exe所在目录: {base_dir}")
+    print(f"[DEBUG] sys.frozen: {getattr(sys, 'frozen', False)}")
+    return config_path
 
 # ============ 加载配置 ============
 def load_config():
@@ -55,15 +85,37 @@ def load_config():
     config_path = get_config_path()
     default_config = {"password": "0829", "work_minutes": 30, "break_minutes": 30, "work_end_time": None, "remind_before_minutes": 5}
 
+    # 写日志
+    def write_log(msg):
+        log_path = os.path.join(os.path.dirname(config_path), 'parent_control.log')
+        try:
+            with open(log_path, 'a', encoding='utf-8') as log:
+                log.write(f"{msg}\n")
+        except:
+            pass
+        print(msg)
+
     # 如果配置文件不存在，创建默认配置
     if not os.path.exists(config_path):
+        write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 配置文件不存在，准备创建...")
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 import json
                 json.dump(default_config, f, ensure_ascii=False, indent=4)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建默认配置文件: {config_path}")
+            write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建默认配置文件: {config_path}")
         except Exception as e:
-            print(f"创建配置文件失败: {e}")
+            write_log(f"[ERROR] 创建配置文件失败: {e}")
+            write_log(f"[ERROR] 尝试在用户目录创建...")
+            # 备用方案：尝试在用户目录创建
+            try:
+                backup_path = os.path.join(os.path.expanduser("~"), "parental_control_config.json")
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    import json
+                    json.dump(default_config, f, ensure_ascii=False, indent=4)
+                write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建备用配置文件: {backup_path}")
+                return g_config
+            except Exception as e2:
+                write_log(f"[ERROR] 创建备用配置文件也失败: {e2}")
 
     # 加载配置
     try:
@@ -74,9 +126,12 @@ def load_config():
         print(f"加载配置失败: {e}, 使用默认配置")
         g_config = default_config
 
-    # 确保 work_end_time 字段存在
+    # 确保必要字段存在
     if "work_end_time" not in g_config:
         g_config["work_end_time"] = None
+    # 锁屏结束时间
+    if "break_end_time" not in g_config:
+        g_config["break_end_time"] = None
 
     return g_config
 
@@ -95,49 +150,52 @@ def save_config():
 
 # ============ 锁屏窗口 ============
 class LockScreen:
-    def __init__(self, on_unlock_callback, is_forced=False):
+    def __init__(self, on_unlock_callback, is_forced=False, remaining_seconds=None):
         self.root = tk.Tk()
         self.root.attributes('-fullscreen', True, '-topmost', True)
         self.root.configure(bg='#1a1a2e')
         self.on_unlock = on_unlock_callback
         self.is_forced = is_forced  # 是否强制锁屏（用于区分正常休息）
-        
+
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         self.root.bind('<Alt-F4>', lambda e: 'break')
         self.root.bind('<Escape>', lambda e: 'break')
-        
+
         frame = tk.Frame(self.root, bg='#1a1a2e')
         frame.place(relx=0.5, rely=0.5, anchor='center')
-        
+
         title = "🔒 强制锁屏" if is_forced else "⏰ 休息时间到！"
-        tk.Label(frame, text=title, font=('Microsoft YaHei', 48, 'bold'), 
+        tk.Label(frame, text=title, font=('Microsoft YaHei', 48, 'bold'),
                 fg='#e94560', bg='#1a1a2e').pack(pady=20)
-        
+
         if is_forced:
-            tk.Label(frame, text="家长强制锁定", 
+            tk.Label(frame, text="家长强制锁定",
                     font=('Microsoft YaHei', 20), fg='#ffd700', bg='#1a1a2e').pack()
-        
-        self.time_label = tk.Label(frame, text="休息倒计时: 30:00", 
+
+        self.time_label = tk.Label(frame, text="休息倒计时: 30:00",
                                   font=('Microsoft YaHei', 20), fg='#4ecca3', bg='#1a1a2e')
         self.time_label.pack(pady=10)
-        
+
         pwd_frame = tk.Frame(frame, bg='#1a1a2e')
         pwd_frame.pack(pady=30)
-        
-        tk.Label(pwd_frame, text="输入密码解锁:", font=('Microsoft YaHei', 16), 
+
+        tk.Label(pwd_frame, text="输入密码解锁:", font=('Microsoft YaHei', 16),
                 fg='#eaeaea', bg='#1a1a2e').pack(side='left', padx=10)
-        
+
         self.pwd_entry = tk.Entry(pwd_frame, show='●', font=('Arial', 16), width=15)
         self.pwd_entry.pack(side='left')
         self.pwd_entry.bind('<Return>', lambda e: self.check_password())
         self.pwd_entry.focus()
-        
+
         tk.Button(pwd_frame, text="解锁", command=self.check_password,
                  font=('Microsoft YaHei', 12), bg='#e94560', fg='white',
                  padx=20, pady=5).pack(side='left', padx=10)
-        
-        # 休息时间从配置读取
-        self.remaining = g_config.get("break_minutes", 5) * 60
+
+        # 休息时间：如果传入了剩余秒数则使用，否则从配置读取
+        if remaining_seconds is not None:
+            self.remaining = remaining_seconds
+        else:
+            self.remaining = g_config.get("break_minutes", 5) * 60
         self.update_timer()
         
     def update_timer(self):
@@ -317,17 +375,26 @@ class LockScreenManager:
         self.lock_screen = None
         self.on_unlock_callback = None
 
-    def show_lock(self, forced=False):
+    def show_lock(self, forced=False, remaining_seconds=None):
         """在新线程中显示锁屏"""
         if self.lock_screen:
             return
-        self.lock_screen = LockScreen(self.on_break_complete, is_forced=forced)
+
+        # 计算锁屏结束时间并保存
+        break_end_time = datetime.now() + timedelta(minutes=g_config.get("break_minutes", 5))
+        g_config["break_end_time"] = break_end_time.strftime('%Y-%m-%d %H:%M:%S')
+        save_config()
+
+        self.lock_screen = LockScreen(self.on_break_complete, is_forced=forced, remaining_seconds=remaining_seconds)
         self.lock_screen.run()
 
     def on_break_complete(self):
         """解锁回调"""
         print(f"[{datetime.now().strftime('%H:%M:%S')}] 解锁")
         self.lock_screen = None
+        # 清除锁屏状态
+        g_config["break_end_time"] = None
+        save_config()
         if self.on_unlock_callback:
             self.on_unlock_callback()
 
@@ -358,6 +425,32 @@ class ParentControl:
     def start(self):
         # 重置提醒状态
         self.remind_shown = False
+
+        # 检查是否在锁屏期间（重启后恢复锁屏）
+        break_end_time = g_config.get("break_end_time")
+        if break_end_time:
+            try:
+                break_end = datetime.strptime(break_end_time, '%Y-%m-%d %H:%M:%S')
+                now = datetime.now()
+
+                if now < break_end:
+                    # 仍在锁屏期间，计算剩余时间
+                    remaining_seconds = int((break_end - now).total_seconds())
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 检测到未完成的锁屏期间，剩余 {remaining_seconds} 秒，正在恢复锁屏...")
+                    # 设置解锁回调
+                    self.lock_manager.on_unlock_callback = self.on_break_complete
+                    # 在新线程显示锁屏，传入剩余时间
+                    threading.Thread(target=self.lock_manager.show_lock, args=(False, remaining_seconds), daemon=True).start()
+                    # 等待锁屏显示
+                    time.sleep(3)
+                else:
+                    # 锁屏期间已过，清除状态
+                    g_config["break_end_time"] = None
+                    save_config()
+            except (ValueError, TypeError):
+                g_config["break_end_time"] = None
+                save_config()
+
         # 尝试从配置中恢复工作结束时间
         saved_end_time = g_config.get("work_end_time")
         if saved_end_time:
@@ -441,6 +534,10 @@ class ParentControl:
                 remaining_minutes = remaining.total_seconds() / 60
                 remind_before_minutes = g_config.get("remind_before_minutes", 5)
 
+                # 调试输出
+                if remaining_minutes <= remind_before_minutes + 1:
+                    print(f"[DEBUG] remaining_minutes={remaining_minutes:.1f}, remind_before={remind_before_minutes}, remind_shown={self.remind_shown}")
+
                 if 0 < remaining_minutes <= remind_before_minutes and not self.remind_shown:
                     self.remind_shown = True
                     try:
@@ -449,7 +546,7 @@ class ParentControl:
                             message=f"距离锁屏还剩 {int(remaining_minutes)} 分钟，请保存工作！",
                             timeout=5
                         )
-                        winsound.PlaySound(r"C:\Windows\Media\Ring04.wav", winsound.SND_FILENAME)
+                        winsound.PlaySound(get_audio_path(), winsound.SND_FILENAME)
                         print(f"[{datetime.now().strftime('%H:%M:%S')}] 已发送提前提醒")
                     except Exception as e:
                         print(f"发送提醒失败: {e}")
@@ -458,7 +555,7 @@ class ParentControl:
             now = datetime.now()
             if now >= self.work_end_time and not self.lock_manager.lock_screen:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] 时间到，锁屏")
-                winsound.PlaySound(r"C:\Windows\Media\Ring04.wav", winsound.SND_FILENAME)
+                winsound.PlaySound(get_audio_path(), winsound.SND_FILENAME)
                 threading.Thread(target=self.lock_manager.show_lock, args=(False,), daemon=True).start()
                 time.sleep(2)
 
@@ -574,7 +671,8 @@ if __name__ == "__main__":
         tk.Tk().withdraw()
         messagebox.showinfo("家长控制", "程序已经在运行！")
         sys.exit(0)
-    
+
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 单实例锁检查通过")
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 家长控制启动...")
     app = ParentControl()
     app.start()
