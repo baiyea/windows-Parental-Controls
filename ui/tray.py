@@ -60,13 +60,17 @@ def get_tray_menu():
 
     # 检查开机启动状态
     startup_status = "✓ 开机启动" if is_in_startup() else "✗ 开机启动"
+    
+    # 根据状态机状态判断是否可以锁屏
+    from core.state_machine import AppState
+    can_lock = not g_controller.state_machine.is_in_state(AppState.LOCKED)
 
     return pystray.Menu(
         pystray.MenuItem(
             f"⏱ {g_controller.get_remaining_time()}",
             lambda icon, item: None, enabled=False
         ),
-        pystray.MenuItem("🔒 立即锁屏", on_tray_clicked, enabled=not g_controller.lock_manager.lock_screen),
+        pystray.MenuItem("🔒 立即锁屏", on_tray_clicked, enabled=can_lock),
         pystray.MenuItem("─", lambda icon, item: None, enabled=False),
         pystray.MenuItem(startup_status, on_tray_clicked),
         pystray.MenuItem("🚪 退出", on_tray_clicked),

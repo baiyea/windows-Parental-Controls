@@ -2,6 +2,9 @@
 import sys
 import os
 import winreg as reg
+from utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_exe_path():
@@ -32,9 +35,10 @@ def add_to_startup():
                          0, reg.KEY_WRITE)
         reg.SetValueEx(key, "ParentControl", 0, reg.REG_SZ, f'"{get_exe_path()}"')
         reg.CloseKey(key)
+        logger.info("添加开机启动成功")
         return True
     except Exception as e:
-        print(f"✗ 添加开机启动失败: {e}")
+        logger.error(f"添加开机启动失败: {e}")
         return False
 
 
@@ -46,11 +50,12 @@ def remove_from_startup():
                          0, reg.KEY_WRITE)
         reg.DeleteValue(key, "ParentControl")
         reg.CloseKey(key)
+        logger.info("移除开机启动成功")
         return True
     except FileNotFoundError:
         return True
     except Exception as e:
-        print(f"✗ 移除开机启动失败: {e}")
+        logger.error(f"移除开机启动失败: {e}")
         return False
 
 

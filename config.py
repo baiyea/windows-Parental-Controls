@@ -2,7 +2,9 @@
 import os
 import sys
 import json
-from datetime import datetime
+from utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_config_path():
@@ -15,19 +17,9 @@ def get_config_path():
         base_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(base_dir, 'config.json')
 
-    # 写日志到文件
-    log_path = os.path.join(base_dir, 'parent_control.log')
-    try:
-        with open(log_path, 'a', encoding='utf-8') as log:
-            log.write(f"[DEBUG] 配置文件路径: {config_path}\n")
-            log.write(f"[DEBUG] exe所在目录: {base_dir}\n")
-            log.write(f"[DEBUG] sys.frozen: {getattr(sys, 'frozen', False)}\n")
-    except:
-        pass
-
-    print(f"[DEBUG] 配置文件路径: {config_path}")
-    print(f"[DEBUG] exe所在目录: {base_dir}")
-    print(f"[DEBUG] sys.frozen: {getattr(sys, 'frozen', False)}")
+    logger.debug(f"配置文件路径: {config_path}")
+    logger.debug(f"exe所在目录: {base_dir}")
+    logger.debug(f"sys.frozen: {getattr(sys, 'frozen', False)}")
     return config_path
 
 
@@ -43,42 +35,32 @@ def load_config():
         "remind_before_minutes": 5
     }
 
-    # 写日志
-    def write_log(msg):
-        log_path = os.path.join(os.path.dirname(config_path), 'parent_control.log')
-        try:
-            with open(log_path, 'a', encoding='utf-8') as log:
-                log.write(f"{msg}\n")
-        except:
-            pass
-        print(msg)
-
     # 如果配置文件不存在，创建默认配置
     if not os.path.exists(config_path):
-        write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 配置文件不存在，准备创建...")
+        logger.info("配置文件不存在，准备创建...")
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, ensure_ascii=False, indent=4)
-            write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建默认配置文件: {config_path}")
+            logger.info(f"已创建默认配置文件: {config_path}")
         except Exception as e:
-            write_log(f"[ERROR] 创建配置文件失败: {e}")
-            write_log(f"[ERROR] 尝试在用户目录创建...")
+            logger.error(f"创建配置文件失败: {e}")
+            logger.info("尝试在用户目录创建...")
             # 备用方案：尝试在用户目录创建
             try:
                 backup_path = os.path.join(os.path.expanduser("~"), "parental_control_config.json")
                 with open(backup_path, 'w', encoding='utf-8') as f:
                     json.dump(default_config, f, ensure_ascii=False, indent=4)
-                write_log(f"[{datetime.now().strftime('%H:%M:%S')}] 已创建备用配置文件: {backup_path}")
+                logger.info(f"已创建备用配置文件: {backup_path}")
                 return g_config
             except Exception as e2:
-                write_log(f"[ERROR] 创建备用配置文件也失败: {e2}")
+                logger.error(f"创建备用配置文件也失败: {e2}")
 
     # 加载配置
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             g_config = json.load(f)
     except Exception as e:
-        print(f"加载配置失败: {e}, 使用默认配置")
+        logger.error(f"加载配置失败: {e}, 使用默认配置")
         g_config = default_config
 
     # 确保必要字段存在
@@ -98,9 +80,9 @@ def save_config():
     try:
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(g_config, f, ensure_ascii=False, indent=4)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 配置已保存")
+        logger.info("配置已保存")
     except Exception as e:
-        print(f"保存配置失败: {e}")
+        logger.error(f"保存配置失败: {e}")
 
 
 # 全局配置变量

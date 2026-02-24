@@ -3,11 +3,15 @@ import sys
 import argparse
 import tkinter as tk
 from tkinter import messagebox
-from datetime import datetime
 
 from config import load_config
 from platform import SingleInstance, add_to_startup
 from core import ParentControl
+from utils import setup_logger, get_logger
+
+# 初始化日志系统
+setup_logger()
+logger = get_logger(__name__)
 
 
 def main():
@@ -26,13 +30,13 @@ def main():
     # 检查单实例锁
     locker = SingleInstance()
     if not locker.try_lock():
-        print("程序已在运行")
+        logger.warning("程序已在运行")
         tk.Tk().withdraw()
         messagebox.showinfo("家长控制", "程序已经在运行！")
         sys.exit(0)
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 单实例锁检查通过")
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 家长控制启动...")
+    logger.info("单实例锁检查通过")
+    logger.info("家长控制启动...")
     app = ParentControl()
     app.start()
 

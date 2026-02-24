@@ -2,6 +2,9 @@
 from datetime import datetime, timedelta
 import config
 from ui.lock_screen import LockScreen
+from utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class LockScreenManager:
@@ -26,7 +29,7 @@ class LockScreenManager:
 
     def on_break_complete(self):
         """解锁回调"""
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 解锁")
+        logger.info("锁屏解锁")
         self.lock_screen = None
         # 清除锁屏状态
         config.g_config["break_end_time"] = None

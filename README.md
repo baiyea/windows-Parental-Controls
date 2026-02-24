@@ -24,6 +24,28 @@
 #### 开发测试启动命令
 uv run main.py
 
+#### 打包成 exe
+Windows (PowerShell):
+```powershell
+.\build.ps1
+```
+
+Linux/Mac (Bash):
+```bash
+bash build.sh
+```
+
+打包后的文件位于 `dist/ParentControl.exe`
+
+#### 日志系统
+程序使用统一的日志系统，所有日志会同时输出到：
+- 控制台（实时查看）
+- 日志文件：`log/年-月-日.log`（例如：`log/2026-02-24.log`）
+
+日志格式：`[时间戳] [级别] [模块] 消息`
+
+详细说明请查看：[日志系统文档](doc/logging.md)
+
 #### 配置 config.json
 
 ``` json
