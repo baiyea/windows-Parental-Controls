@@ -21,8 +21,8 @@
 右下角图标
 ![输入图片说明](doc/img/image.png)
 
-#### 运行环境
-uv run
+#### 开发测试启动命令
+uv run main.py
 
 #### 配置 config.json
 
