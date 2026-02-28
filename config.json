@@ -1,0 +1,9 @@
+{
+    "password": "0829",
+    "work_minutes": 3,
+    "break_minutes": 3,
+    "remind_before_minutes": 1,
+    "break_end_time": null,
+    "work_end_time": "2026-02-24 17:48:18",
+    "auto_restart_after_lock_seconds": 60
+}
