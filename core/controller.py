@@ -54,6 +54,7 @@ class ParentControl:
         self.force_lock_flag = threading.Event()
         self.remind_shown = False
         self.timer = None
+        self.restart_timer = None  # 自动重启计时器
 
         # 初始化状态机
         self.state_machine = StateMachine(AppState.IDLE)
@@ -325,6 +326,7 @@ class ParentControl:
         self.running = False
         if self.timer:
             self.timer.cancel()
+        self._cancel_restart()  # 取消自动重启
         logger.info("程序退出")
 
     def _on_unlock_callback(self):
@@ -349,8 +351,34 @@ class ParentControl:
         """进入锁屏状态"""
         logger.info("进入锁屏状态")
 
+        # 启动自动重启计时器
+        restart_delay = config.g_config.get('auto_restart_after_lock_seconds', 60)
+        if restart_delay > 0:
+            self._schedule_restart(restart_delay)
+
+    def _schedule_restart(self, delay_seconds):
+        """安排自动重启"""
+        def do_restart():
+            import subprocess
+            subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
+            logger.info("正在强制重启计算机")
+
+        self._cancel_restart()  # 先取消已有的计时器
+        self.restart_timer = threading.Timer(delay_seconds, do_restart)
+        self.restart_timer.daemon = True
+        self.restart_timer.start()
+        logger.info(f"已安排 {delay_seconds} 秒后自动重启")
+
+    def _cancel_restart(self):
+        """取消自动重启"""
+        if self.restart_timer:
+            self.restart_timer.cancel()
+            self.restart_timer = None
+            logger.info("已取消自动重启")
+
     def _on_exit_locked(self, **kwargs):
         """离开锁屏状态"""
+        self._cancel_restart()  # 取消自动重启
         config.g_config["break_end_time"] = None
         config.save_config()
         logger.info("离开锁屏状态")
