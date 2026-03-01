@@ -1,7 +1,7 @@
 """键盘拦截器模块 - 使用 Windows 钩子拦截 Win 键"""
 import ctypes
 import ctypes.wintypes
-from ctypes import windll
+from ctypes import windll, WINFUNCTYPE, POINTER
 
 logger = None
 
@@ -15,6 +15,12 @@ def _get_logger():
     return logger
 
 
+# 定义 CallNextHookEx 函数原型
+CallNextHookEx = windll.user32.CallNextHookEx
+CallNextHookEx.argtypes = [ctypes.wintypes.HHOOK, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+CallNextHookEx.restype = ctypes.c_int
+
+
 # KBDLLHOOKSTRUCT 结构定义
 class KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [
@@ -22,7 +28,7 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("scanCode", ctypes.wintypes.DWORD),
         ("flags", ctypes.wintypes.DWORD),
         ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.wintypes.ULONG_PTR)
+        ("dwExtraInfo", ctypes.c_void_p)
     ]
 
 
@@ -54,7 +60,7 @@ class KeyInterceptor:
         except Exception as e:
             _get_logger().error(f"键盘钩子回调错误: {e}")
 
-        return windll.user32.CallNextHookEx(self.hook_id, code, wparam, lparam)
+        return CallNextHookEx(self.hook_id, code, wparam, lparam)
 
     def start(self):
         """启动键盘拦截"""
