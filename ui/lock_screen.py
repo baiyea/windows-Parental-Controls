@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import messagebox
 import config
+from utils.key_interceptor import KeyInterceptor
 
 
 class LockScreen:
@@ -9,6 +10,9 @@ class LockScreen:
 
     def __init__(self, on_unlock_callback, is_forced=False, remaining_seconds=None):
         self.root = tk.Tk()
+        # 启动键盘拦截器
+        self.key_interceptor = KeyInterceptor()
+        self.key_interceptor.start()
         self.root.attributes('-fullscreen', True, '-topmost', True)
         self.root.configure(bg='#1a1a2e')
         self.on_unlock = on_unlock_callback
@@ -68,12 +72,14 @@ class LockScreen:
 
     def auto_unlock(self):
         """倒计时结束后自动解锁"""
+        self.key_interceptor.stop()  # 停止拦截
         self.root.destroy()
         if self.on_unlock:
             self.on_unlock()
 
     def check_password(self):
         if self.pwd_entry.get() == config.g_config.get("password", "1234"):
+            self.key_interceptor.stop()  # 停止拦截
             self.root.destroy()
             self.on_unlock()
         else:
