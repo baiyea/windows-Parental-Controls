@@ -54,7 +54,7 @@ bash build.sh
     "work_minutes": 30, //工作/学习计时时长(分钟)，到达时间后自动锁屏
     "break_minutes": 30, //休息倒计时时长(分钟)，休息期间无法解锁
     "remind_before_minutes": 5, //提前提醒时间(分钟)，锁屏前多久发送通知和声音提醒
-    "auto_restart_after_lock": true //锁屏后是否自动重启计算机
+    "auto_restart_after_lock": false //锁屏后是否自动重启计算机
 }
 ```
 

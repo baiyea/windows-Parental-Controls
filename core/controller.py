@@ -302,7 +302,7 @@ class ParentControl:
             pass
 
         # 锁屏后立即重启计算机
-        if config.g_config.get('auto_restart_after_lock', True):
+        if config.g_config.get('auto_restart_after_lock', False):
             import subprocess
             subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
             logger.info("正在强制重启计算机")

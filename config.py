@@ -33,7 +33,7 @@ def load_config():
         "break_minutes": 30,
         "work_end_time": None,
         "remind_before_minutes": 5,
-        "auto_restart_after_lock": True
+        "auto_restart_after_lock": False
     }
 
     # 如果配置文件不存在，创建默认配置
