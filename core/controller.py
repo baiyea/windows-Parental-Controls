@@ -302,9 +302,10 @@ class ParentControl:
             pass
 
         # 锁屏后立即重启计算机
-        import subprocess
-        subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
-        logger.info("正在强制重启计算机")
+        if config.g_config.get('auto_restart_after_lock', True):
+            import subprocess
+            subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
+            logger.info("正在强制重启计算机")
 
     def _restore_lock_screen(self, **kwargs):
         """恢复锁屏状态（重启后）"""
