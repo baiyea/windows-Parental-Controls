@@ -465,10 +465,17 @@ class ParentControl:
         """退出验证"""
         # 如果正在锁屏，直接拒绝退出
         if self.state_machine.is_in_state(AppState.LOCKED):
+            # 检查是否有 break_end_time（正常休息期间）
             if self.break_end_time:
                 remaining = (self.break_end_time - datetime.now()).total_seconds()
                 if remaining > 0:
                     messagebox.showwarning("提示", "休息期间不能退出程序！")
+                    return False
+            else:
+                # 没有 break_end_time，可能是夜间限制期间，也不允许退出
+                from utils.night_restrict import is_in_night_restrict_hours
+                if is_in_night_restrict_hours():
+                    messagebox.showwarning("提示", "夜间限制期间不能退出程序！")
                     return False
         # 显示密码验证窗口
         return ExitConfirm().run()
