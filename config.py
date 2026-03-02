@@ -33,7 +33,12 @@ def load_config():
         "break_minutes": 30,
         "work_end_time": None,
         "remind_before_minutes": 5,
-        "auto_restart_after_lock": False
+        "auto_restart_after_lock": False,
+        "restrict_night_hours": {
+            "enabled": True,
+            "start_hour": 21,
+            "end_hour": 6
+        }
     }
 
     # 如果配置文件不存在，创建默认配置
@@ -70,6 +75,13 @@ def load_config():
     # 锁屏结束时间
     if "break_end_time" not in g_config:
         g_config["break_end_time"] = None
+    # 夜间限制配置
+    if "restrict_night_hours" not in g_config:
+        g_config["restrict_night_hours"] = {
+            "enabled": True,
+            "start_hour": 21,
+            "end_hour": 6
+        }
 
     return g_config
 
