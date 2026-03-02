@@ -33,7 +33,20 @@ class LockScreen:
             tk.Label(frame, text="家长强制锁定",
                     font=('Microsoft YaHei', 20), fg='#ffd700', bg='#1a1a2e').pack()
 
-        self.time_label = tk.Label(frame, text="休息倒计时: 30:00",
+        # 休息时间：如果 remaining_seconds 为 -1，表示无限期（夜间限制）
+        if remaining_seconds is not None and remaining_seconds >= 0:
+            self.remaining = remaining_seconds
+            self.is_countdown = True
+        else:
+            self.remaining = 0  # 无限期，不倒计时
+            self.is_countdown = False
+
+        # 夜间限制时显示额外提示
+        if not self.is_countdown:
+            tk.Label(frame, text="⚠️ 夜间限制时段，密码解锁后立即开始工作",
+                    font=('Microsoft YaHei', 16), fg='#ff6b6b', bg='#1a1a2e').pack(pady=10)
+
+        self.time_label = tk.Label(frame, text="",
                                   font=('Microsoft YaHei', 20), fg='#4ecca3', bg='#1a1a2e')
         self.time_label.pack(pady=10)
 
@@ -52,23 +65,22 @@ class LockScreen:
                  font=('Microsoft YaHei', 12), bg='#e94560', fg='white',
                  padx=20, pady=5).pack(side='left', padx=10)
 
-        # 休息时间：如果传入了剩余秒数则使用，否则从配置读取
-        if remaining_seconds is not None:
-            self.remaining = remaining_seconds
-        else:
-            self.remaining = config.g_config.get("break_minutes", 5) * 60
         self.update_timer()
 
     def update_timer(self):
-        mins, secs = divmod(self.remaining, 60)
-        self.time_label.config(text=f"休息倒计时: {mins:02d}:{secs:02d}")
-        if self.remaining > 0:
-            self.remaining -= 1
-            self.root.after(1000, self.update_timer)
+        if self.is_countdown:
+            mins, secs = divmod(self.remaining, 60)
+            self.time_label.config(text=f"休息倒计时: {mins:02d}:{secs:02d}")
+            if self.remaining > 0:
+                self.remaining -= 1
+                self.root.after(1000, self.update_timer)
+            else:
+                self.time_label.config(text="✓ 休息完成！", fg='#4ecca3')
+                # 自动解锁
+                self.root.after(1000, self.auto_unlock)
         else:
-            self.time_label.config(text="✓ 休息完成！", fg='#4ecca3')
-            # 自动解锁
-            self.root.after(1000, self.auto_unlock)
+            # 无限期模式，显示提示信息
+            self.time_label.config(text="夜间限制时段，只能密码解锁", fg='#ff6b6b')
 
     def auto_unlock(self):
         """倒计时结束后自动解锁"""
