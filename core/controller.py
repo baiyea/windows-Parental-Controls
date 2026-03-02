@@ -272,29 +272,45 @@ class ParentControl:
 
     def _lock_screen(self, **kwargs):
         """锁定屏幕"""
-        # 计算休息结束时间
-        break_minutes = config.g_config.get("break_minutes", 30)
-        self.break_end_time = datetime.now() + timedelta(minutes=break_minutes)
-        
-        # 保存状态
-        config.g_config["break_end_time"] = self.break_end_time.strftime('%Y-%m-%d %H:%M:%S')
-        config.save_config()
-        
+        # 检查是否在夜间限制时段
+        from utils.night_restrict import is_in_night_restrict_hours
+        is_night_restrict = is_in_night_restrict_hours()
+
+        if is_night_restrict:
+            # 夜间限制：跳过休息倒计时
+            self.break_end_time = None  # 不设置结束时间
+            logger.info("夜间限制时段，锁屏不设置休息倒计时")
+        else:
+            # 正常：计算休息结束时间
+            break_minutes = config.g_config.get("break_minutes", 30)
+            self.break_end_time = datetime.now() + timedelta(minutes=break_minutes)
+
+            # 保存状态
+            config.g_config["break_end_time"] = self.break_end_time.strftime('%Y-%m-%d %H:%M:%S')
+            config.save_config()
+
         # 显示锁屏
         is_forced = kwargs.get('forced', False)
         remaining_seconds = kwargs.get('remaining_seconds')
-        
+
+        # 夜间限制时传入 -1 表示无限期（只有密码能解锁）
+        if is_night_restrict:
+            remaining_seconds = -1
+
         # 设置解锁回调
         self.lock_manager.on_unlock_callback = self._on_unlock_callback
-        
+
         threading.Thread(
             target=self.lock_manager.show_lock,
             args=(is_forced, remaining_seconds),
             daemon=True
         ).start()
-        
-        logger.info(f"锁屏开始，结束时间: {self.break_end_time.strftime('%H:%M:%S')}")
-        
+
+        if is_night_restrict:
+            logger.info("夜间限制锁屏开始")
+        else:
+            logger.info(f"锁屏开始，结束时间: {self.break_end_time.strftime('%H:%M:%S')}")
+
         # 播放音效
         try:
             winsound.PlaySound(get_audio_path(), winsound.SND_FILENAME)
