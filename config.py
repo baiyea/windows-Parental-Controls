@@ -2,9 +2,25 @@
 import os
 import sys
 import json
+import tomllib
 from utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_version():
+    """从 pyproject.toml 读取版本号"""
+    pyproject_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pyproject.toml')
+    try:
+        with open(pyproject_path, 'rb') as f:
+            data = tomllib.load(f)
+            return data.get('project', {}).get('version', '1.7.00')
+    except Exception:
+        return '1.7.00'
+
+
+# 兼容旧代码
+VERSION = get_version()
 
 
 def get_config_path():

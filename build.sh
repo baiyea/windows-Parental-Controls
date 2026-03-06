@@ -38,6 +38,24 @@ uv run pyinstaller \
     main.py
 
 if [ $? -eq 0 ]; then
+    # 递增版本号
+    VERSION_FILE="pyproject.toml"
+    # 提取当前版本号
+    CURRENT_VERSION=$(grep -oP 'version = "\K[0-9.]+' "$VERSION_FILE")
+    # 提取最后两位数字
+    MAJOR_VERSION=$(echo "$CURRENT_VERSION" | cut -d'.' -f1-2)
+    MINOR_VERSION=$(echo "$CURRENT_VERSION" | cut -d'.' -f3)
+    # 递增（处理 99 后回到 00）
+    if [ "$MINOR_VERSION" -eq 99 ]; then
+        NEW_MINOR="00"
+    else
+        NEW_MINOR=$(printf "%02d" $((10#$MINOR_VERSION + 1)))
+    fi
+    NEW_VERSION="${MAJOR_VERSION}.${NEW_MINOR}"
+    # 写回 pyproject.toml
+    sed -i "s/version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/" "$VERSION_FILE"
+    echo "版本号已更新: $CURRENT_VERSION -> $NEW_VERSION"
+
     echo -e "${GREEN}✓ 打包成功: dist/ParentControl.exe${NC}"
     echo ""
     echo "功能说明:"

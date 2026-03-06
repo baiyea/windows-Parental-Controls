@@ -4,6 +4,7 @@ from PIL import Image, ImageDraw
 import pystray
 
 from platform import toggle_startup, is_in_startup
+from config import VERSION
 from .password_dialog import PasswordConfirm
 
 # 全局变量用于存储控制器引用
@@ -71,8 +72,8 @@ def get_tray_menu():
             lambda icon, item: None, enabled=False
         ),
         pystray.MenuItem("🔒 立即锁屏", on_tray_clicked, enabled=can_lock),
-        pystray.MenuItem("─", lambda icon, item: None, enabled=False),
         pystray.MenuItem(startup_status, on_tray_clicked),
+        pystray.MenuItem(f"版本号 {VERSION}", lambda icon, item: None, enabled=False),
         pystray.MenuItem("🚪 退出", on_tray_clicked),
     )
 
