@@ -11,6 +11,29 @@ uv run *
 
 # 项目架构
 
+## 业务流程图 (Mermaid)
+
+```mermaid
+graph TD
+    IDLE((空闲状态)) -->|程序启动| START_CHECK{启动检查}
+    START_CHECK -->|在夜间限制内| LOCKED
+    START_CHECK -->|在历史休息期内| LOCKED
+    START_CHECK -->|正常启动| WORKING
+    
+    WORKING[工作中] -->|时间到达/强制锁屏| REMINDING[提醒阶段]
+    WORKING -->|21:00 夜间限制| LOCKED[锁屏中]
+    
+    REMINDING -->|倒计时结束| LOCKED
+    REMINDING -->|21:00 夜间限制| LOCKED
+    
+    LOCKED -->|倒计时结束| WORKING
+    LOCKED -->|密码解锁| WORKING
+    LOCKED -->|06:00 夜间结束| WORKING
+    
+    WORKING -.->|右键退出+验证| EXITING((程序退出))
+    LOCKED -.->|右键退出+验证| EXITING
+```
+
 ## 目录结构
 
 - `main.py` - 程序入口
@@ -27,6 +50,7 @@ uv run *
 - `core/controller.py` - 主控制器
 - `core/lock_manager.py` - 锁屏管理
 - `core/state_machine.py` - 状态机
+- `utils/night_restrict.py` - 夜间限制时段判断
 - `ui/` - tkinter 界面
 
 # 开发命令
@@ -41,6 +65,17 @@ uv run python main.py --install # 安装到开机启动
 
 - `dist/ParentControl.exe` - 构建后的可执行文件
 - `build/` - 构建临时文件
+
+## 夜间限制配置 (config.json)
+
+- `restrict_night_hours.enabled` - 是否启用夜间限制
+- `restrict_night_hours.start_hour` - 开始时间（默认21）
+- `restrict_night_hours.end_hour` - 结束时间（默认6）
+
+## 版本号
+
+- 从 `pyproject.toml` 读取，使用 `tomllib` 模块
+- `config.get_version()` 函数获取
 
 # 注意事项
 

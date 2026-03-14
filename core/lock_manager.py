@@ -19,11 +19,6 @@ class LockScreenManager:
         if self.lock_screen:
             return
 
-        # 计算锁屏结束时间并保存
-        break_end_time = datetime.now() + timedelta(minutes=config.g_config.get("break_minutes", 5))
-        config.g_config["break_end_time"] = break_end_time.strftime('%Y-%m-%d %H:%M:%S')
-        config.save_config()
-
         self.lock_screen = LockScreen(self.on_break_complete, is_forced=forced, remaining_seconds=remaining_seconds)
         self.lock_screen.run()
 

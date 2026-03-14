@@ -170,7 +170,24 @@ class ParentControl:
 
     def start(self):
         """启动控制器"""
-        # 检查是否需要恢复锁屏状态
+        # 1. 检查是否在夜间限制时段（最高优先级）
+        from utils.night_restrict import is_in_night_restrict_hours
+        if is_in_night_restrict_hours():
+            logger.info("启动时检测到处于夜间限制时段，准备进入锁屏...")
+            # 确保清除可能残留的普通休息结束时间
+            config.g_config["break_end_time"] = None
+            config.save_config()
+            
+            # 触发状态转换
+            self.state_machine.trigger(AppEvent.RESTORE_STATE, has_lock_state=True, remaining_seconds=-1)
+            
+            # 启动后台线程
+            threading.Thread(target=self.monitor_loop, daemon=True).start()
+            threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+            self._run_tray()
+            return
+
+        # 2. 检查是否需要恢复之前的普通锁屏状态
         break_end_time = config.g_config.get("break_end_time")
         if break_end_time:
             try:
@@ -197,7 +214,7 @@ class ParentControl:
                 config.g_config["break_end_time"] = None
                 config.save_config()
 
-        # 正常启动 - 触发 START 事件
+        # 3. 正常启动 - 触发 START 事件
         self.state_machine.trigger(AppEvent.START)
 
         # 启动后台线程
@@ -280,6 +297,9 @@ class ParentControl:
             # 夜间限制：跳过休息倒计时
             self.break_end_time = None  # 不设置结束时间
             logger.info("夜间限制时段，锁屏不设置休息倒计时")
+            # 显式清除配置文件中的 break_end_time
+            config.g_config["break_end_time"] = None
+            config.save_config()
         else:
             # 正常：计算休息结束时间
             break_minutes = config.g_config.get("break_minutes", 30)
@@ -410,6 +430,7 @@ class ParentControl:
 
     def monitor_loop(self):
         """监控循环 - 检测时间和强制锁屏信号"""
+        from utils.night_restrict import is_in_night_restrict_hours
         while self.running:
             # 检查强制锁屏信号
             if self.force_lock_flag.is_set() and not self.lock_manager.lock_screen:
@@ -421,10 +442,18 @@ class ParentControl:
 
             # 根据当前状态检查时间
             current_state = self.state_machine.get_state()
+            is_night_restrict = is_in_night_restrict_hours()
             
-            if current_state == AppState.WORKING:
+            if current_state == AppState.WORKING or current_state == AppState.REMINDING:
+                # 检查是否进入夜间限制时段
+                if is_night_restrict:
+                    logger.info("检测到进入夜间限制时段，触发强制锁屏")
+                    self.state_machine.trigger(AppEvent.FORCE_LOCK, forced=True)
+                    time.sleep(2)
+                    continue
+
                 # 检查提前提醒
-                if self.work_end_time and not self.remind_shown:
+                if current_state == AppState.WORKING and self.work_end_time and not self.remind_shown:
                     remaining = self.work_end_time - datetime.now()
                     remaining_minutes = remaining.total_seconds() / 60
                     remind_before_minutes = config.g_config.get("remind_before_minutes", 5)
@@ -437,17 +466,18 @@ class ParentControl:
                     self.state_machine.trigger(AppEvent.WORK_TIME_UP)
                     time.sleep(2)
                     
-            elif current_state == AppState.REMINDING:
-                # 检查工作时间是否到
-                if self.work_end_time and datetime.now() >= self.work_end_time:
-                    self.state_machine.trigger(AppEvent.WORK_TIME_UP)
-                    time.sleep(2)
-                    
             elif current_state == AppState.LOCKED:
-                # 检查休息时间是否到
-                if self.break_end_time and datetime.now() >= self.break_end_time:
-                    self.state_machine.trigger(AppEvent.BREAK_TIME_UP)
-                    time.sleep(2)
+                # 检查休息时间是否到（普通锁屏）
+                if self.break_end_time:
+                    if datetime.now() >= self.break_end_time:
+                        self.state_machine.trigger(AppEvent.BREAK_TIME_UP)
+                        time.sleep(2)
+                else:
+                    # 夜间限制锁屏，检查是否已过夜间时段
+                    if not is_night_restrict:
+                        logger.info("夜间限制时段已结束，自动解除锁屏")
+                        self.state_machine.trigger(AppEvent.BREAK_TIME_UP)
+                        time.sleep(2)
 
             time.sleep(1)
 
