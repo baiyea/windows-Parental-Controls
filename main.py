@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from config import load_config
+from utils.updater import run_auto_update
 from platform import SingleInstance, add_to_startup
 from core import ParentControl
 from utils import setup_logger, get_logger
@@ -26,6 +27,9 @@ def main():
     if args.install:
         add_to_startup()
         sys.exit(0)
+
+    # 执行自动更新检查
+    run_auto_update()
 
     # 检查单实例锁
     locker = SingleInstance()
