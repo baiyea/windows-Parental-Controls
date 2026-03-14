@@ -56,6 +56,10 @@ if [ $? -eq 0 ]; then
     sed -i "s/version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/" "$VERSION_FILE"
     echo "版本号已更新: $CURRENT_VERSION -> $NEW_VERSION"
 
+    # 写入版本号文件
+    echo "$NEW_VERSION" > dist/version.txt
+    echo "版本号已写入: dist/version.txt"
+
     echo -e "${GREEN}✓ 打包成功: dist/ParentControl.exe${NC}"
     echo ""
     echo "功能说明:"
