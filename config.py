@@ -9,7 +9,22 @@ logger = get_logger(__name__)
 
 
 def get_version():
-    """从 pyproject.toml 读取版本号"""
+    """从 version.txt 或 pyproject.toml 读取版本号"""
+    # 1. 优先读取 version.txt（打包后使用）
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    version_file = os.path.join(base_dir, 'version.txt')
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except Exception:
+            pass
+
+    # 2. 备选：从 pyproject.toml 读取
     pyproject_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pyproject.toml')
     try:
         with open(pyproject_path, 'rb') as f:
@@ -97,6 +112,13 @@ def load_config():
             "enabled": True,
             "start_hour": 21,
             "end_hour": 6
+        }
+
+    # 自动更新配置
+    if "auto_update" not in g_config:
+        g_config["auto_update"] = {
+            "enabled": True,
+            "last_check_time": None
         }
 
     return g_config
