@@ -1,6 +1,6 @@
 [project]
 name = "parental-control"
-version = "1.7.3"
+version = "1.7.07"
 description = "家长控制程序windows电脑版, 电脑每隔30分钟休息30分钟, 或输入密码解锁."
 readme = "README.md"
 requires-python = ">=3.13"
