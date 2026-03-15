@@ -44,7 +44,7 @@ publish_to_gitee() {
     release_response=$(curl -s -X POST "${api_url}/releases" \
         -H "Authorization: token ${token}" \
         -H "Content-Type: application/json" \
-        -d "{\"tag_name\": \"v${version}\", \"target_commitish\": \"master\", \"name\": \"v${version}\"}")
+        -d "{\"tag_name\": \"v${version}\", \"target_commitish\": \"master\", \"name\": \"v${version}\", \"body\": \"v${version}\"}")
 
     # 检查是否创建成功（返回包含 id 表示成功）
     local release_id
@@ -53,7 +53,7 @@ publish_to_gitee() {
     if [ -z "$release_id" ]; then
         # 可能已存在，尝试获取现有的 release_id
         echo -e "${YELLOW}Release 可能已存在，尝试获取...${NC}"
-        release_id=$(curl -s "${api_url}/releases/tags/v${version}" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        release_id=$(curl -s "${api_url}/releases/latest?tag_name=v${version}" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
     fi
 
     if [ -z "$release_id" ]; then
