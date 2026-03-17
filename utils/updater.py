@@ -5,6 +5,7 @@ import json
 import shutil
 import urllib.request
 import urllib.error
+import re
 from typing import Optional
 import config
 from utils import get_logger
@@ -36,9 +37,9 @@ def parse_version(version_str: str) -> tuple:
     return tuple(int(p) for p in parts)
 
 
-def check_for_update() -> tuple[bool, Optional[str]]:
+def check_for_update() -> tuple[bool, Optional[str], Optional[str]]:
     """检查是否有新版本
-    返回: (是否有新版本, 新版本下载URL)
+    返回: (是否有新版本, 新版本下载URL, 最新版本号)
     """
     try:
         # 确保配置已加载
@@ -49,7 +50,7 @@ def check_for_update() -> tuple[bool, Optional[str]]:
         auto_update = config.g_config.get('auto_update', {})
         if not auto_update.get('enabled', True):
             logger.info("自动更新已禁用")
-            return False, None
+            return False, None, None
 
         # 调用 Gitee API
         logger.info(f"检查更新: {GITEE_API_URL}")
@@ -70,28 +71,31 @@ def check_for_update() -> tuple[bool, Optional[str]]:
             # 查找 exe 下载链接
             assets = data.get('assets', [])
             for asset in assets:
-                if asset.get('name', '').endswith('.exe'):
+                name = asset.get('name', '')
+                if name.startswith('ParentControl.windows.') and name.endswith('.exe'):
                     download_url = asset.get('browser_download_url')
                     logger.info(f"发现新版本: {latest_version}, 下载URL: {download_url}")
-                    return True, download_url
+                    return True, download_url, latest_version
 
         logger.info("当前已是最新版本")
-        return False, None
+        return False, None, None
 
     except urllib.error.URLError as e:
         logger.error(f"检查更新失败: 网络错误 - {e}")
-        return False, None
+        return False, None, None
     except Exception as e:
         logger.error(f"检查更新失败: {e}")
-        return False, None
+        return False, None, None
 
 
-def download_update(url: str) -> Optional[str]:
+def download_update(url: str, latest_version: str) -> Optional[str]:
     """下载更新包
     返回: 下载后的文件路径，失败返回 None
     """
     update_dir = get_update_dir()
-    dest_path = os.path.join(update_dir, 'ParentControl.exe')
+    # 对版本号去零（与打包文件名一致）
+    latest_version_no_zero = re.sub(r'\.0+([0-9])', r'.\1', latest_version.lstrip('v'))
+    dest_path = os.path.join(update_dir, f'ParentControl.windows.{latest_version_no_zero}.exe')
 
     try:
         logger.info(f"下载更新包: {url}")
@@ -145,11 +149,20 @@ def apply_pending_update() -> bool:
     返回: 是否成功应用更新
     """
     update_dir = get_update_dir()
-    new_exe = os.path.join(update_dir, 'ParentControl.exe')
 
-    if not os.path.exists(new_exe):
+    # 查找匹配 ParentControl.windows.*.exe 的文件
+    new_exe = None
+    for f in os.listdir(update_dir):
+        if f.startswith('ParentControl.windows.') and f.endswith('.exe'):
+            new_exe = os.path.join(update_dir, f)
+            break
+
+    if not new_exe:
         logger.info("没有待更新的文件")
         return False
+
+    # 从文件名提取版本号用于日志
+    current_version = os.path.basename(new_exe).replace('ParentControl.windows.', '').replace('.exe', '')
 
     try:
         # 获取当前 exe 路径
@@ -173,7 +186,7 @@ def apply_pending_update() -> bool:
         # 清理更新目录
         os.remove(new_exe)
 
-        logger.info("更新应用成功")
+        logger.info(f"更新应用成功 (版本: {current_version})")
         return True
 
     except Exception as e:
@@ -188,9 +201,9 @@ def run_auto_update():
         logger.info("已应用上次的更新")
 
     # 2. 检查新版本
-    has_update, download_url = check_for_update()
-    if has_update and download_url:
+    has_update, download_url, latest_version = check_for_update()
+    if has_update and download_url and latest_version:
         # 3. 下载更新包
-        downloaded = download_update(download_url)
+        downloaded = download_update(download_url, latest_version)
         if downloaded:
             logger.info("更新包已下载，重启后自动应用")
