@@ -64,11 +64,11 @@ publish_to_gitee() {
     echo -e "${GREEN}Release 创建成功，ID: ${release_id}${NC}"
 
     # 2. 上传 exe 资产
-    echo -e "${YELLOW}上传 ParentControl.exe...${NC}"
+    echo -e "${YELLOW}上传 ParentControl.windows.${version}.exe...${NC}"
     local upload_response
     upload_response=$(curl -s -X POST "${api_url}/releases/${release_id}/attach_files" \
         -H "Authorization: token ${token}" \
-        -F "file=@dist/ParentControl.exe")
+        -F "file=@dist/ParentControl.windows.${version}.exe")
 
     # 检查上传结果
     if echo "$upload_response" | grep -q '"browser_download_url"'; then
@@ -99,12 +99,16 @@ uv add pystray pillow pyinstaller plyer -v
 # 清理
 rm -rf build dist *.spec
 
+# 读取当前版本号并去零
+CURRENT_VERSION=$(grep -oP 'version = "\K[0-9.]+' pyproject.toml)
+VERSION_NO_ZERO=$(echo "$CURRENT_VERSION" | sed -E 's/\.0+([0-9])/.\1/g')
+
 # 打包（包含音频文件、utils模块和隐藏导入）
 echo -e "${YELLOW}打包中...${NC}"
 uv run pyinstaller \
     --onefile \
     --noconsole \
-    --name ParentControl \
+    --name ParentControl.windows.${VERSION_NO_ZERO} \
     --add-data "doc/audio:audio" \
     --hidden-import=pystray \
     --hidden-import=PIL \
@@ -131,18 +135,20 @@ if [ $? -eq 0 ]; then
         NEW_MINOR=$(printf "%02d" $((10#$MINOR_VERSION + 1)))
     fi
     NEW_VERSION="${MAJOR_VERSION}.${NEW_MINOR}"
+    # 版本号去零：1.7.09 -> 1.7.9，只去掉前导零
+    VERSION_NO_ZERO=$(echo "$NEW_VERSION" | sed -E 's/\.0+([0-9])/.\1/g')
     # 写回 pyproject.toml
     sed -i "s/version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/" "$VERSION_FILE"
     echo "版本号已更新: $CURRENT_VERSION -> $NEW_VERSION"
 
     # 写入版本号文件
-    echo "$NEW_VERSION" > dist/version.txt
+    echo "$VERSION_NO_ZERO" > dist/version.txt
     echo "版本号已写入: dist/version.txt"
 
     # 发布到 Gitee
-    publish_to_gitee "$NEW_VERSION"
+    publish_to_gitee "$VERSION_NO_ZERO"
 
-    echo -e "${GREEN}✓ 打包成功: dist/ParentControl.exe${NC}"
+    echo -e "${GREEN}✓ 打包成功: dist/ParentControl.windows.${VERSION_NO_ZERO}.exe${NC}"
     echo ""
     echo "功能说明:"
     echo "  • 系统托盘显示剩余时间"
@@ -152,7 +158,7 @@ if [ $? -eq 0 ]; then
     echo "  • 日志自动保存到 log/年-月-日.log"
     echo ""
     echo "安装开机启动:"
-    echo "  ./dist/ParentControl.exe --install"
+    echo "  ./dist/ParentControl.windows.${VERSION_NO_ZERO}.exe --install"
     echo ""
     echo "日志位置:"
     echo "  exe所在目录/log/年-月-日.log"
