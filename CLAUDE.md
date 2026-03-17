@@ -63,7 +63,7 @@ uv run python main.py --install # 安装到开机启动
 
 # 构建产物
 
-- `dist/ParentControl.exe` - 构建后的可执行文件
+- `dist/ParentControl.windows.{版本号}.exe` - 构建后的可执行文件（如 `ParentControl.windows.1.7.9.exe`）
 - `build/` - 构建临时文件
 
 ## 夜间限制配置 (config.json)
