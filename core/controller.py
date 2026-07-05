@@ -196,8 +196,8 @@ class ParentControl:
             return
 
         # 1. 检查是否在夜间限制时段（最高优先级）
-        from utils.night_restrict import is_in_night_restrict_hours
-        if is_in_night_restrict_hours():
+        from utils.night_restrict import is_night_restrict_enforced
+        if is_night_restrict_enforced(now=self._now()):
             logger.info("启动时检测到处于夜间限制时段，准备进入锁屏...")
             # 确保清除可能残留的普通休息结束时间
             config.g_config["break_end_time"] = None
@@ -345,9 +345,9 @@ class ParentControl:
     def _lock_screen(self, **kwargs):
         """锁定屏幕"""
         # 检查是否在夜间限制时段
-        from utils.night_restrict import is_in_night_restrict_hours
+        from utils.night_restrict import is_night_restrict_enforced
         try:
-            is_night_restrict = is_in_night_restrict_hours()
+            is_night_restrict = is_night_restrict_enforced(now=self._now())
         except TrustedTimeUnavailable:
             logger.error("无法获取可信线上时间，锁屏不设置休息倒计时")
             is_night_restrict = True
@@ -458,6 +458,14 @@ class ParentControl:
     def _on_unlock_callback(self):
         """解锁回调"""
         logger.info("密码解锁成功")
+        try:
+            from utils.night_restrict import activate_night_unlock_override, is_in_night_restrict_hours
+
+            now = self._now()
+            if is_in_night_restrict_hours(now=now):
+                activate_night_unlock_override(now=now)
+        except TrustedTimeUnavailable:
+            logger.error("无法获取可信线上时间，跳过夜间临时放行")
         self.state_machine.trigger(AppEvent.PASSWORD_UNLOCK)
 
     # ===== 状态进入/退出动作 =====
@@ -542,7 +550,7 @@ class ParentControl:
 
     def monitor_loop(self):
         """监控循环 - 检测时间和强制锁屏信号"""
-        from utils.night_restrict import is_in_night_restrict_hours
+        from utils.night_restrict import is_night_restrict_enforced
         while self.running:
             # 检查强制锁屏信号
             if self.force_lock_flag.is_set() and not self.lock_manager.lock_screen:
@@ -557,7 +565,7 @@ class ParentControl:
             try:
                 self._refresh_trusted_time_if_needed()
                 now = self._now()
-                is_night_restrict = is_in_night_restrict_hours(now=now)
+                is_night_restrict = is_night_restrict_enforced(now=now)
             except TrustedTimeUnavailable:
                 logger.error("可信线上时间不可用，进入或保持锁屏")
                 if current_state != AppState.LOCKED:
@@ -624,8 +632,8 @@ class ParentControl:
                     return False
             else:
                 # 没有 break_end_time，可能是夜间限制期间，也不允许退出
-                from utils.night_restrict import is_in_night_restrict_hours
-                if is_in_night_restrict_hours():
+                from utils.night_restrict import is_night_restrict_enforced
+                if is_night_restrict_enforced(now=self._now()):
                     messagebox.showwarning("提示", "夜间限制期间不能退出程序！")
                     return False
         # 显示密码验证窗口

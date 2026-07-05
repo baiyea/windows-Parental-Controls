@@ -69,7 +69,9 @@ def load_config():
         "restrict_night_hours": {
             "enabled": True,
             "start_hour": 21,
-            "end_hour": 6
+            "end_hour": 6,
+            "password_unlock_grace_minutes": 30,
+            "override_until": None
         },
         "trusted_time": {
             "enabled": True,
@@ -124,8 +126,16 @@ def load_config():
         g_config["restrict_night_hours"] = {
             "enabled": True,
             "start_hour": 21,
-            "end_hour": 6
+            "end_hour": 6,
+            "password_unlock_grace_minutes": 30,
+            "override_until": None
         }
+    else:
+        night_config = g_config["restrict_night_hours"]
+        if "password_unlock_grace_minutes" not in night_config:
+            night_config["password_unlock_grace_minutes"] = 30
+        if "override_until" not in night_config:
+            night_config["override_until"] = None
 
     # 自动更新配置
     if "auto_update" not in g_config:

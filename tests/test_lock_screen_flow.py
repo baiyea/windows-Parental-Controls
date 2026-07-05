@@ -48,6 +48,8 @@ class LockScreenFlowTest(unittest.TestCase):
                 "enabled": False,
                 "start_hour": 21,
                 "end_hour": 6,
+                "password_unlock_grace_minutes": 30,
+                "override_until": None,
             },
             "trusted_time": {
                 "enabled": True,
@@ -148,6 +150,25 @@ class LockScreenFlowTest(unittest.TestCase):
 
         self.assertEqual(control.state_machine.get_state(), AppState.LOCKED)
         self.assertEqual(control.break_end_time, now + timedelta(minutes=30))
+
+    def test_night_password_unlock_sets_temporary_override(self):
+        now = datetime(2026, 7, 5, 22, 0, 0)
+        config.g_config["restrict_night_hours"]["enabled"] = True
+        control = ParentControl()
+        control.state_machine.current_state = AppState.LOCKED
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config") as save_mock,
+        ):
+            control._on_unlock_callback()
+
+        self.assertEqual(control.state_machine.get_state(), AppState.WORKING)
+        self.assertEqual(
+            config.g_config["restrict_night_hours"]["override_until"],
+            "2026-07-05 22:30:00",
+        )
+        save_mock.assert_called()
 
 
 if __name__ == "__main__":
