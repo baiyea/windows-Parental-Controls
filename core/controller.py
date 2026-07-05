@@ -631,11 +631,7 @@ class ParentControl:
                     messagebox.showwarning("提示", "休息期间不能退出程序！")
                     return False
             else:
-                # 没有 break_end_time，可能是夜间限制期间，也不允许退出
-                from utils.night_restrict import is_night_restrict_enforced
-                if is_night_restrict_enforced(now=self._now()):
-                    messagebox.showwarning("提示", "夜间限制期间不能退出程序！")
-                    return False
+                logger.info("夜间限制锁屏期间允许通过密码验证退出")
         # 显示密码验证窗口
         return ExitConfirm().run()
 

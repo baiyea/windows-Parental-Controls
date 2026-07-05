@@ -32,6 +32,11 @@ class FakeLockManager:
         self.lock_screen = None
 
 
+class FakeExitConfirm:
+    def run(self):
+        return True
+
+
 class LockScreenFlowTest(unittest.TestCase):
     def setUp(self):
         self.original_config = config.g_config
@@ -169,6 +174,41 @@ class LockScreenFlowTest(unittest.TestCase):
             "2026-07-05 22:30:00",
         )
         save_mock.assert_called()
+
+    def test_night_locked_exit_uses_password_confirmation(self):
+        now = datetime(2026, 7, 5, 22, 0, 0)
+        config.g_config["restrict_night_hours"]["enabled"] = True
+        control = ParentControl()
+        control.state_machine.current_state = AppState.LOCKED
+        control.break_end_time = None
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(controller_module, "ExitConfirm", return_value=FakeExitConfirm()) as exit_confirm_mock,
+            patch.object(controller_module.messagebox, "showwarning") as warning_mock,
+        ):
+            result = control.confirm_exit()
+
+        self.assertTrue(result)
+        exit_confirm_mock.assert_called_once()
+        warning_mock.assert_not_called()
+
+    def test_normal_break_locked_exit_still_blocked(self):
+        now = datetime(2026, 7, 5, 14, 0, 0)
+        control = ParentControl()
+        control.state_machine.current_state = AppState.LOCKED
+        control.break_end_time = now + timedelta(minutes=10)
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(controller_module, "ExitConfirm") as exit_confirm_mock,
+            patch.object(controller_module.messagebox, "showwarning") as warning_mock,
+        ):
+            result = control.confirm_exit()
+
+        self.assertFalse(result)
+        exit_confirm_mock.assert_not_called()
+        warning_mock.assert_called_once()
 
 
 if __name__ == "__main__":
