@@ -1,5 +1,4 @@
 """锁屏管理模块"""
-from datetime import datetime, timedelta
 import config
 from ui.lock_screen import LockScreen
 from utils import get_logger
@@ -21,6 +20,12 @@ class LockScreenManager:
 
         self.lock_screen = LockScreen(self.on_break_complete, is_forced=forced, remaining_seconds=remaining_seconds)
         self.lock_screen.run()
+
+    def close_lock(self):
+        """由控制器主动关闭锁屏窗口，不触发解锁回调。"""
+        if self.lock_screen:
+            self.lock_screen.close()
+            self.lock_screen = None
 
     def on_break_complete(self):
         """解锁回调"""

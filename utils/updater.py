@@ -6,6 +6,7 @@ import shutil
 import urllib.request
 import urllib.error
 import re
+import subprocess
 from typing import Optional
 import config
 from utils import get_logger
@@ -111,8 +112,6 @@ def download_update(url: str, latest_version: str) -> Optional[str]:
         req.add_header('User-Agent', 'ParentControl/1.0')
 
         with urllib.request.urlopen(req, timeout=60) as response:
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
             chunk_size = 8192
 
             with open(dest_path + '.tmp', 'wb') as f:
@@ -121,7 +120,6 @@ def download_update(url: str, latest_version: str) -> Optional[str]:
                     if not chunk:
                         break
                     f.write(chunk)
-                    downloaded += len(chunk)
 
         # 重命名完成
         if os.path.exists(dest_path):
@@ -153,7 +151,7 @@ def apply_pending_update() -> bool:
     # 查找匹配 ParentControl.windows.*.exe 的文件
     new_exe = None
     for f in os.listdir(update_dir):
-        if f.startswith('ParentControl.windows.') and f.endswith('.exe'):
+        if re.fullmatch(r"ParentControl\.windows\.\d+(?:\.\d+)*\.exe", f):
             new_exe = os.path.join(update_dir, f)
             break
 
@@ -161,7 +159,7 @@ def apply_pending_update() -> bool:
         logger.info("没有待更新的文件")
         return False
 
-    # 从文件名提取版本号用于日志
+    # 从文件名提取版本号
     current_version = os.path.basename(new_exe).replace('ParentControl.windows.', '').replace('.exe', '')
 
     try:
@@ -172,21 +170,34 @@ def apply_pending_update() -> bool:
             logger.info("开发模式，跳过更新应用")
             return False
 
-        logger.info(f"应用更新: {new_exe} -> {current_exe}")
+        logger.info(f"准备更新: {new_exe} -> {current_exe}")
 
-        # 备份当前 exe
-        backup_exe = current_exe + '.bak'
-        if os.path.exists(backup_exe):
-            os.remove(backup_exe)
-        shutil.copy2(current_exe, backup_exe)
+        # 获取程序所在目录
+        app_dir = os.path.dirname(current_exe)
+        version_txt = os.path.join(app_dir, 'version.txt')
 
-        # 替换为新 exe
-        shutil.copy2(new_exe, current_exe)
+        # 创建更新脚本（用于重启后替换 exe）
+        update_script = os.path.join(app_dir, 'update.bat')
+        script_content = f'''@echo off
+timeout /t 2 /nobreak >nul
+copy /y "{new_exe}" "{current_exe}"
+del "{new_exe}"
+echo {current_version} > "{version_txt}"
+del "%~f0"
+start "" "{current_exe}"
+'''
+        with open(update_script, 'w', encoding='utf-8') as f:
+            f.write(script_content)
 
-        # 清理更新目录
-        os.remove(new_exe)
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            f'"{update_script}"',
+            shell=True,
+            cwd=app_dir,
+            creationflags=creationflags,
+        )
 
-        logger.info(f"更新应用成功 (版本: {current_version})")
+        logger.info(f"更新脚本已启动，将应用更新 (版本: {current_version})")
         return True
 
     except Exception as e:
@@ -199,6 +210,7 @@ def run_auto_update():
     # 1. 先检查并应用待更新
     if apply_pending_update():
         logger.info("已应用上次的更新")
+        return "update_applied"
 
     # 2. 检查新版本
     has_update, download_url, latest_version = check_for_update()
@@ -206,4 +218,7 @@ def run_auto_update():
         # 3. 下载更新包
         downloaded = download_update(download_url, latest_version)
         if downloaded:
-            logger.info("更新包已下载，重启后自动应用")
+            logger.info("更新包已下载，请重启应用以完成更新")
+            return "download_complete"
+
+    return None

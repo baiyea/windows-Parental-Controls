@@ -17,6 +17,7 @@ class LockScreen:
         self.root.configure(bg='#1a1a2e')
         self.on_unlock = on_unlock_callback
         self.is_forced = is_forced  # 是否强制锁屏（用于区分正常休息）
+        self.closed = False
 
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         self.root.bind('<Alt-F4>', lambda e: 'break')
@@ -84,19 +85,34 @@ class LockScreen:
 
     def auto_unlock(self):
         """倒计时结束后自动解锁"""
-        self.key_interceptor.stop()  # 停止拦截
-        self.root.destroy()
+        self.close()
         if self.on_unlock:
             self.on_unlock()
 
     def check_password(self):
         if self.pwd_entry.get() == config.g_config.get("password", "1234"):
-            self.key_interceptor.stop()  # 停止拦截
-            self.root.destroy()
+            self.close()
             self.on_unlock()
         else:
             messagebox.showerror("错误", "密码错误！", parent=self.root)
             self.pwd_entry.delete(0, 'end')
+
+    def close(self):
+        """关闭锁屏窗口。可由控制器跨线程请求关闭。"""
+        try:
+            self.root.after(0, self._close_now)
+        except Exception:
+            self._close_now()
+
+    def _close_now(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.key_interceptor.stop()
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def run(self):
         self.root.mainloop()

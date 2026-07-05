@@ -29,7 +29,10 @@ def main():
         sys.exit(0)
 
     # 执行自动更新检查
-    run_auto_update()
+    update_result = run_auto_update()
+    if update_result == "update_applied":
+        logger.info("更新脚本已启动，退出当前程序")
+        sys.exit(0)
 
     # 检查单实例锁
     locker = SingleInstance()

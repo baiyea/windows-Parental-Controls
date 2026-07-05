@@ -65,10 +65,20 @@ def load_config():
         "work_end_time": None,
         "remind_before_minutes": 5,
         "auto_restart_after_lock": False,
+        "debug_mode": False,
         "restrict_night_hours": {
             "enabled": True,
             "start_hour": 21,
             "end_hour": 6
+        },
+        "trusted_time": {
+            "enabled": True,
+            "servers": [
+                "ntp.aliyun.com",
+                "ntp.tencent.com"
+            ],
+            "sync_interval_minutes": 10,
+            "timeout_seconds": 3
         }
     }
 
@@ -106,6 +116,9 @@ def load_config():
     # 锁屏结束时间
     if "break_end_time" not in g_config:
         g_config["break_end_time"] = None
+    # 调试模式：进入锁屏状态但不显示真实锁屏窗口
+    if "debug_mode" not in g_config:
+        g_config["debug_mode"] = False
     # 夜间限制配置
     if "restrict_night_hours" not in g_config:
         g_config["restrict_night_hours"] = {
@@ -119,6 +132,18 @@ def load_config():
         g_config["auto_update"] = {
             "enabled": True,
             "last_check_time": None
+        }
+
+    # 可信线上时间配置
+    if "trusted_time" not in g_config:
+        g_config["trusted_time"] = {
+            "enabled": True,
+            "servers": [
+                "ntp.aliyun.com",
+                "ntp.tencent.com"
+            ],
+            "sync_interval_minutes": 10,
+            "timeout_seconds": 3
         }
 
     return g_config

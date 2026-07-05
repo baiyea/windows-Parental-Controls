@@ -1,12 +1,12 @@
 """夜间限制工具函数"""
-from datetime import datetime
 import config
 from utils import get_logger
+from utils.trusted_time import trusted_now
 
 logger = get_logger(__name__)
 
 
-def is_in_night_restrict_hours():
+def is_in_night_restrict_hours(now=None):
     """判断当前是否在夜间限制时段"""
     # 确保配置已加载
     if config.g_config is None:
@@ -18,7 +18,10 @@ def is_in_night_restrict_hours():
     if not night_config.get("enabled", False):
         return False
 
-    current_hour = datetime.now().hour
+    if now is None:
+        now = trusted_now()
+
+    current_hour = now.hour
     start_hour = night_config.get("start_hour", 21)
     end_hour = night_config.get("end_hour", 6)
 

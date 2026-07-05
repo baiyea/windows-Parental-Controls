@@ -1,7 +1,7 @@
 """键盘拦截器模块 - 使用 Windows 钩子拦截 Win 键"""
 import ctypes
 import ctypes.wintypes
-from ctypes import windll, WINFUNCTYPE, POINTER
+from ctypes import windll
 
 logger = None
 

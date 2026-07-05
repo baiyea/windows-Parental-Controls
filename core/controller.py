@@ -14,6 +14,7 @@ from core.state_machine import StateMachine, AppState, AppEvent, StateTransition
 from ui import create_tray_image, get_tray_menu, ExitConfirm
 from ui.tray import set_controller
 from utils import get_logger
+from utils.trusted_time import TrustedTimeUnavailable, sync_now, trusted_now
 
 logger = get_logger(__name__)
 
@@ -54,6 +55,7 @@ class ParentControl:
         self.force_lock_flag = threading.Event()
         self.remind_shown = False
         self.timer = None
+        self.last_trusted_sync_monotonic = None
 
         # 初始化状态机
         self.state_machine = StateMachine(AppState.IDLE)
@@ -83,6 +85,14 @@ class ParentControl:
             to_state=AppState.LOCKED,
             action=self._restore_lock_screen,
             guard=lambda **kw: kw.get('has_lock_state', False)
+        ))
+
+        # IDLE -> LOCKED (启动时发现工作时间已过)
+        sm.add_transition(StateTransition(
+            from_state=AppState.IDLE,
+            event=AppEvent.FORCE_LOCK,
+            to_state=AppState.LOCKED,
+            action=self._lock_screen
         ))
         
         # WORKING -> REMINDING (到达提醒时间)
@@ -162,7 +172,10 @@ class ParentControl:
             return "休息中"
         if not self.work_end_time:
             return "00:00"
-        remaining = self.work_end_time - datetime.now()
+        try:
+            remaining = self.work_end_time - self._now()
+        except TrustedTimeUnavailable:
+            return "时间不可用"
         if remaining.total_seconds() <= 0:
             return "00:00"
         mins, secs = divmod(int(remaining.total_seconds()), 60)
@@ -170,6 +183,18 @@ class ParentControl:
 
     def start(self):
         """启动控制器"""
+        try:
+            self._sync_trusted_time()
+        except TrustedTimeUnavailable:
+            logger.error("启动时无法获取可信线上时间，进入锁屏")
+            config.g_config["break_end_time"] = None
+            config.save_config()
+            self.state_machine.trigger(AppEvent.RESTORE_STATE, has_lock_state=True, remaining_seconds=-1)
+            threading.Thread(target=self.monitor_loop, daemon=True).start()
+            threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+            self._run_tray()
+            return
+
         # 1. 检查是否在夜间限制时段（最高优先级）
         from utils.night_restrict import is_in_night_restrict_hours
         if is_in_night_restrict_hours():
@@ -192,7 +217,7 @@ class ParentControl:
         if break_end_time:
             try:
                 break_end = datetime.strptime(break_end_time, '%Y-%m-%d %H:%M:%S')
-                now = datetime.now()
+                now = self._now()
 
                 if now < break_end:
                     # 仍在锁屏期间，恢复锁屏
@@ -214,7 +239,33 @@ class ParentControl:
                 config.g_config["break_end_time"] = None
                 config.save_config()
 
-        # 3. 正常启动 - 触发 START 事件
+        # 3. 检查是否需要恢复之前的工作计时
+        work_end_time = config.g_config.get("work_end_time")
+        if work_end_time:
+            try:
+                work_end = datetime.strptime(work_end_time, '%Y-%m-%d %H:%M:%S')
+                now = self._now()
+
+                if now < work_end:
+                    logger.info(f"恢复未完成的工作计时，结束时间: {work_end.strftime('%H:%M:%S')}")
+                    self.state_machine.trigger(AppEvent.START, work_end_time=work_end)
+                    threading.Thread(target=self.monitor_loop, daemon=True).start()
+                    threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+                    self._run_tray()
+                    return
+
+                logger.info("检测到工作计时已过，启动时直接进入锁屏")
+                config.g_config["work_end_time"] = None
+                self.state_machine.trigger(AppEvent.FORCE_LOCK, forced=True)
+                threading.Thread(target=self.monitor_loop, daemon=True).start()
+                threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+                self._run_tray()
+                return
+            except (ValueError, TypeError):
+                config.g_config["work_end_time"] = None
+                config.save_config()
+
+        # 4. 正常启动 - 触发 START 事件
         self.state_machine.trigger(AppEvent.START)
 
         # 启动后台线程
@@ -258,8 +309,12 @@ class ParentControl:
 
     def _start_work_timer(self, **kwargs):
         """开始工作计时"""
-        work_minutes = config.g_config.get("work_minutes", 30)
-        self.work_end_time = datetime.now() + timedelta(minutes=work_minutes)
+        restored_work_end_time = kwargs.get("work_end_time")
+        if restored_work_end_time:
+            self.work_end_time = restored_work_end_time
+        else:
+            work_minutes = config.g_config.get("work_minutes", 30)
+            self.work_end_time = self._now() + timedelta(minutes=work_minutes)
         
         # 保存状态
         config.g_config["work_end_time"] = self.work_end_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -273,7 +328,7 @@ class ParentControl:
         if not self.work_end_time:
             return
             
-        remaining = self.work_end_time - datetime.now()
+        remaining = self.work_end_time - self._now()
         remaining_minutes = int(remaining.total_seconds() / 60)
         
         try:
@@ -291,7 +346,11 @@ class ParentControl:
         """锁定屏幕"""
         # 检查是否在夜间限制时段
         from utils.night_restrict import is_in_night_restrict_hours
-        is_night_restrict = is_in_night_restrict_hours()
+        try:
+            is_night_restrict = is_in_night_restrict_hours()
+        except TrustedTimeUnavailable:
+            logger.error("无法获取可信线上时间，锁屏不设置休息倒计时")
+            is_night_restrict = True
 
         if is_night_restrict:
             # 夜间限制：跳过休息倒计时
@@ -303,7 +362,7 @@ class ParentControl:
         else:
             # 正常：计算休息结束时间
             break_minutes = config.g_config.get("break_minutes", 30)
-            self.break_end_time = datetime.now() + timedelta(minutes=break_minutes)
+            self.break_end_time = self._now() + timedelta(minutes=break_minutes)
 
             # 保存状态
             config.g_config["break_end_time"] = self.break_end_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -316,6 +375,12 @@ class ParentControl:
         # 夜间限制时传入 -1 表示无限期（只有密码能解锁）
         if is_night_restrict:
             remaining_seconds = -1
+        elif remaining_seconds is None and self.break_end_time:
+            remaining_seconds = max(0, int((self.break_end_time - self._now()).total_seconds()))
+
+        if config.g_config.get("debug_mode", False):
+            self._show_debug_lock_notice(is_night_restrict, remaining_seconds)
+            return
 
         # 设置解锁回调
         self.lock_manager.on_unlock_callback = self._on_unlock_callback
@@ -334,7 +399,7 @@ class ParentControl:
         # 播放音效
         try:
             winsound.PlaySound(get_audio_path(), winsound.SND_FILENAME)
-        except:
+        except Exception:
             pass
 
         # 锁屏后立即重启计算机
@@ -342,6 +407,27 @@ class ParentControl:
             import subprocess
             subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
             logger.info("正在强制重启计算机")
+
+    def _show_debug_lock_notice(self, is_night_restrict: bool, remaining_seconds):
+        """调试模式下只提示，不显示真实锁屏窗口。"""
+        if is_night_restrict:
+            message = "调试模式：已进入夜间锁屏状态，不显示全屏锁屏窗口。"
+        elif remaining_seconds is not None and remaining_seconds >= 0:
+            mins, secs = divmod(int(remaining_seconds), 60)
+            message = f"调试模式：已进入锁屏状态，不显示全屏锁屏窗口。休息倒计时 {mins:02d}:{secs:02d}"
+        else:
+            message = "调试模式：已进入锁屏状态，不显示全屏锁屏窗口。"
+
+        try:
+            notification.notify(
+                title="家长控制调试模式",
+                message=message,
+                timeout=5,
+            )
+        except Exception as e:
+            logger.error(f"发送调试锁屏提醒失败: {e}")
+
+        logger.info(message)
 
     def _restore_lock_screen(self, **kwargs):
         """恢复锁屏状态（重启后）"""
@@ -393,6 +479,8 @@ class ParentControl:
 
     def _on_exit_locked(self, **kwargs):
         """离开锁屏状态"""
+        if hasattr(self.lock_manager, "close_lock"):
+            self.lock_manager.close_lock()
         config.g_config["break_end_time"] = None
         config.save_config()
         logger.info("离开锁屏状态")
@@ -409,7 +497,7 @@ class ParentControl:
         # 锁屏期间不允许退出
         if self.state_machine.is_in_state(AppState.LOCKED):
             if self.break_end_time:
-                remaining = (self.break_end_time - datetime.now()).total_seconds()
+                remaining = (self.break_end_time - self._now()).total_seconds()
                 if remaining > 0:
                     logger.info("锁屏期间不允许退出")
                     return False
@@ -417,9 +505,33 @@ class ParentControl:
 
     # ===== 定时器管理 =====
 
+    def _now(self) -> datetime:
+        """读取可信当前时间。"""
+        return trusted_now()
+
+    def _sync_trusted_time(self) -> datetime:
+        """同步可信时间并记录同步时刻。"""
+        synced_time = sync_now()
+        self.last_trusted_sync_monotonic = time.monotonic()
+        return synced_time
+
+    def _refresh_trusted_time_if_needed(self):
+        """按配置周期刷新可信时间。"""
+        trusted_config = config.g_config.get("trusted_time", {})
+        if not trusted_config.get("enabled", True):
+            return
+
+        interval_seconds = trusted_config.get("sync_interval_minutes", 10) * 60
+        if self.last_trusted_sync_monotonic is None:
+            self._sync_trusted_time()
+            return
+
+        if time.monotonic() - self.last_trusted_sync_monotonic >= interval_seconds:
+            self._sync_trusted_time()
+
     def _schedule_event(self, target_time: datetime, event: AppEvent):
         """调度事件"""
-        delay = (target_time - datetime.now()).total_seconds()
+        delay = (target_time - self._now()).total_seconds()
         if delay > 0:
             if self.timer:
                 self.timer.cancel()
@@ -442,7 +554,16 @@ class ParentControl:
 
             # 根据当前状态检查时间
             current_state = self.state_machine.get_state()
-            is_night_restrict = is_in_night_restrict_hours()
+            try:
+                self._refresh_trusted_time_if_needed()
+                now = self._now()
+                is_night_restrict = is_in_night_restrict_hours(now=now)
+            except TrustedTimeUnavailable:
+                logger.error("可信线上时间不可用，进入或保持锁屏")
+                if current_state != AppState.LOCKED:
+                    self.state_machine.trigger(AppEvent.FORCE_LOCK, forced=True)
+                time.sleep(2)
+                continue
             
             if current_state == AppState.WORKING or current_state == AppState.REMINDING:
                 # 检查是否进入夜间限制时段
@@ -454,7 +575,7 @@ class ParentControl:
 
                 # 检查提前提醒
                 if current_state == AppState.WORKING and self.work_end_time and not self.remind_shown:
-                    remaining = self.work_end_time - datetime.now()
+                    remaining = self.work_end_time - now
                     remaining_minutes = remaining.total_seconds() / 60
                     remind_before_minutes = config.g_config.get("remind_before_minutes", 5)
 
@@ -462,14 +583,14 @@ class ParentControl:
                         self.state_machine.trigger(AppEvent.REMIND_TIME)
                 
                 # 检查工作时间是否到
-                if self.work_end_time and datetime.now() >= self.work_end_time:
+                if self.work_end_time and now >= self.work_end_time:
                     self.state_machine.trigger(AppEvent.WORK_TIME_UP)
                     time.sleep(2)
                     
             elif current_state == AppState.LOCKED:
                 # 检查休息时间是否到（普通锁屏）
                 if self.break_end_time:
-                    if datetime.now() >= self.break_end_time:
+                    if now >= self.break_end_time:
                         self.state_machine.trigger(AppEvent.BREAK_TIME_UP)
                         time.sleep(2)
                 else:
@@ -497,7 +618,7 @@ class ParentControl:
         if self.state_machine.is_in_state(AppState.LOCKED):
             # 检查是否有 break_end_time（正常休息期间）
             if self.break_end_time:
-                remaining = (self.break_end_time - datetime.now()).total_seconds()
+                remaining = (self.break_end_time - self._now()).total_seconds()
                 if remaining > 0:
                     messagebox.showwarning("提示", "休息期间不能退出程序！")
                     return False
