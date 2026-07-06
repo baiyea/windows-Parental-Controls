@@ -38,6 +38,11 @@ def parse_version(version_str: str) -> tuple:
     return tuple(int(p) for p in parts)
 
 
+def normalize_version_for_filename(version_str: str) -> str:
+    """转换为打包文件名使用的版本号格式"""
+    return re.sub(r'\.0+([0-9])', r'.\1', version_str.lstrip('v'))
+
+
 def check_for_update() -> tuple[bool, Optional[str], Optional[str]]:
     """检查是否有新版本
     返回: (是否有新版本, 新版本下载URL, 最新版本号)
@@ -69,14 +74,20 @@ def check_for_update() -> tuple[bool, Optional[str], Optional[str]]:
 
         # 比较版本
         if parse_version(current_version) < parse_version(latest_version):
+            expected_asset_name = f"ParentControl.windows.{normalize_version_for_filename(latest_version)}.exe"
             # 查找 exe 下载链接
             assets = data.get('assets', [])
             for asset in assets:
                 name = asset.get('name', '')
-                if name.startswith('ParentControl.windows.') and name.endswith('.exe'):
+                if name == expected_asset_name:
                     download_url = asset.get('browser_download_url')
+                    if not download_url:
+                        logger.warning(f"更新资产缺少下载链接: {expected_asset_name}")
+                        return False, None, None
                     logger.info(f"发现新版本: {latest_version}, 下载URL: {download_url}")
                     return True, download_url, latest_version
+
+            logger.warning(f"未找到匹配版本的更新资产: {expected_asset_name}")
 
         logger.info("当前已是最新版本")
         return False, None, None
@@ -95,7 +106,7 @@ def download_update(url: str, latest_version: str) -> Optional[str]:
     """
     update_dir = get_update_dir()
     # 对版本号去零（与打包文件名一致）
-    latest_version_no_zero = re.sub(r'\.0+([0-9])', r'.\1', latest_version.lstrip('v'))
+    latest_version_no_zero = normalize_version_for_filename(latest_version)
     dest_path = os.path.join(update_dir, f'ParentControl.windows.{latest_version_no_zero}.exe')
 
     try:
@@ -175,14 +186,16 @@ def apply_pending_update() -> bool:
         # 获取程序所在目录
         app_dir = os.path.dirname(current_exe)
         version_txt = os.path.join(app_dir, 'version.txt')
+        config_json = os.path.join(app_dir, 'config.json')
 
         # 创建更新脚本（用于重启后替换 exe）
         update_script = os.path.join(app_dir, 'update.bat')
         script_content = f'''@echo off
 timeout /t 2 /nobreak >nul
-copy /y "{new_exe}" "{current_exe}"
+copy /y "{new_exe}" "{current_exe}" || exit /b 1
 del "{new_exe}"
 echo {current_version} > "{version_txt}"
+if exist "{config_json}" del /f /q "{config_json}"
 del "%~f0"
 start "" "{current_exe}"
 '''
