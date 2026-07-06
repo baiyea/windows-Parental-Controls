@@ -254,13 +254,20 @@ class ParentControl:
                     self._run_tray()
                     return
 
-                logger.info("检测到工作计时已过，启动时直接进入锁屏")
+                overdue_seconds = (now - work_end).total_seconds()
+                break_seconds = config.g_config.get("break_minutes", 30) * 60
                 config.g_config["work_end_time"] = None
-                self.state_machine.trigger(AppEvent.FORCE_LOCK, forced=True)
-                threading.Thread(target=self.monitor_loop, daemon=True).start()
-                threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
-                self._run_tray()
-                return
+
+                if overdue_seconds <= break_seconds:
+                    logger.info("检测到工作计时刚过期，启动时直接进入锁屏")
+                    self.state_machine.trigger(AppEvent.FORCE_LOCK, forced=True)
+                    threading.Thread(target=self.monitor_loop, daemon=True).start()
+                    threading.Thread(target=self.refresh_tray_loop, daemon=True).start()
+                    self._run_tray()
+                    return
+
+                logger.info("检测到陈旧工作计时，清除后正常启动")
+                config.save_config()
             except (ValueError, TypeError):
                 config.g_config["work_end_time"] = None
                 config.save_config()
