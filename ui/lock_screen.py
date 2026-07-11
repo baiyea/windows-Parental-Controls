@@ -8,6 +8,8 @@ from utils.key_interceptor import KeyInterceptor
 class LockScreen:
     """锁屏窗口类"""
 
+    FOCUS_GUARD_INTERVAL_MS = 500
+
     def __init__(self, on_unlock_callback, is_forced=False, remaining_seconds=None):
         self.root = tk.Tk()
         # 启动键盘拦截器
@@ -18,10 +20,13 @@ class LockScreen:
         self.on_unlock = on_unlock_callback
         self.is_forced = is_forced  # 是否强制锁屏（用于区分正常休息）
         self.closed = False
+        self._focus_guard_scheduled = False
 
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         self.root.bind('<Alt-F4>', lambda e: 'break')
         self.root.bind('<Escape>', lambda e: 'break')
+        self.root.bind('<FocusOut>', self.enforce_lock_focus)
+        self.root.bind('<Visibility>', self.enforce_lock_focus)
 
         frame = tk.Frame(self.root, bg='#1a1a2e')
         frame.place(relx=0.5, rely=0.5, anchor='center')
@@ -67,6 +72,36 @@ class LockScreen:
                  padx=20, pady=5).pack(side='left', padx=10)
 
         self.update_timer()
+        self.enforce_lock_focus()
+
+    def enforce_lock_focus(self, _event=None):
+        """持续把锁屏窗口拉回最前，避免被开始菜单或浏览器盖住。"""
+        if self.closed:
+            return
+
+        try:
+            self.root.attributes('-fullscreen', True)
+            self.root.attributes('-topmost', True)
+            self.root.lift()
+            self.root.focus_force()
+            self.pwd_entry.focus_force()
+        except tk.TclError:
+            return
+
+        self._schedule_focus_guard()
+
+    def _schedule_focus_guard(self):
+        if self.closed or self._focus_guard_scheduled:
+            return
+        try:
+            self._focus_guard_scheduled = True
+            self.root.after(self.FOCUS_GUARD_INTERVAL_MS, self._run_focus_guard)
+        except tk.TclError:
+            self._focus_guard_scheduled = False
+
+    def _run_focus_guard(self):
+        self._focus_guard_scheduled = False
+        self.enforce_lock_focus()
 
     def update_timer(self):
         if self.is_countdown:

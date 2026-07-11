@@ -37,8 +37,12 @@ class KeyInterceptor:
 
     WH_KEYBOARD_LL = 13
     WM_KEYDOWN = 0x0100
+    WM_KEYUP = 0x0101
+    WM_SYSKEYDOWN = 0x0104
+    WM_SYSKEYUP = 0x0105
     VK_LWIN = 0x5B  # 左 Win 键
     VK_RWIN = 0x5C  # 右 Win 键
+    BLOCKED_MESSAGES = {WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP}
 
     def __init__(self):
         self.hook_id = None
@@ -48,7 +52,7 @@ class KeyInterceptor:
     def _keyboard_hook_callback(self, code, wparam, lparam):
         """键盘钩子回调函数"""
         try:
-            if code >= 0 and wparam == self.WM_KEYDOWN:
+            if code >= 0 and wparam in self.BLOCKED_MESSAGES:
                 # 从 lparam 提取虚拟键码
                 kb_struct = ctypes.cast(lparam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                 vk_code = kb_struct.vkCode

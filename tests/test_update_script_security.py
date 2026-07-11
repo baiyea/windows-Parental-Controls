@@ -30,6 +30,7 @@ class UpdateScriptSecurityTest(unittest.TestCase):
                 patch.object(main.sys, "argv", [str(exe_path)]),
                 patch.object(main, "load_config"),
                 patch.object(main, "run_auto_update", return_value=None),
+                patch.object(main, "start_periodic_update_check") as update_check_mock,
                 patch.object(main, "SingleInstance", return_value=FakeLocker()),
                 patch.object(main, "ParentControl", return_value=FakeApp()),
                 patch.object(os, "system") as system_mock,
@@ -37,6 +38,7 @@ class UpdateScriptSecurityTest(unittest.TestCase):
                 main.main()
 
         system_mock.assert_not_called()
+        update_check_mock.assert_called_once()
 
 
 if __name__ == "__main__":

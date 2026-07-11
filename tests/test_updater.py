@@ -25,7 +25,7 @@ class FakeResponse:
 class UpdaterTest(unittest.TestCase):
     def setUp(self):
         self.original_config = config.g_config
-        config.g_config = {"auto_update": {"enabled": True}}
+        config.g_config = {"auto_update": {"enabled": True, "check_interval_minutes": 10}}
 
     def tearDown(self):
         config.g_config = self.original_config
@@ -99,6 +99,37 @@ class UpdaterTest(unittest.TestCase):
         self.assertIn(f'echo 1.7.18 > "{app_dir / "version.txt"}"', script_content)
         self.assertIn(f'if exist "{app_dir / "config.json"}" del /f /q "{app_dir / "config.json"}"', script_content)
         popen_mock.assert_called_once()
+
+    def test_check_and_download_skips_when_update_is_pending(self):
+        with (
+            patch.object(updater, "find_pending_update", return_value="pending.exe"),
+            patch.object(updater, "check_for_update") as check_mock,
+            patch.object(updater, "download_update") as download_mock,
+        ):
+            result = updater.check_and_download_update()
+
+        self.assertEqual(result, "download_pending")
+        check_mock.assert_not_called()
+        download_mock.assert_not_called()
+
+    def test_start_periodic_update_check_starts_daemon_thread(self):
+        with patch.object(updater.threading, "Thread") as thread_mock:
+            thread = updater.start_periodic_update_check()
+
+        self.assertEqual(thread, thread_mock.return_value)
+        thread_mock.assert_called_once()
+        self.assertTrue(thread_mock.call_args.kwargs["daemon"])
+        self.assertEqual(thread_mock.call_args.kwargs["target"], updater.periodic_update_check_loop)
+        thread_mock.return_value.start.assert_called_once()
+
+    def test_start_periodic_update_check_skips_when_disabled(self):
+        config.g_config["auto_update"]["enabled"] = False
+
+        with patch.object(updater.threading, "Thread") as thread_mock:
+            thread = updater.start_periodic_update_check()
+
+        self.assertIsNone(thread)
+        thread_mock.assert_not_called()
 
 
 if __name__ == "__main__":

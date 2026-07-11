@@ -66,6 +66,11 @@ def load_config():
         "remind_before_minutes": 5,
         "auto_restart_after_lock": False,
         "debug_mode": False,
+        "auto_update": {
+            "enabled": True,
+            "last_check_time": None,
+            "check_interval_minutes": 10
+        },
         "restrict_night_hours": {
             "enabled": True,
             "start_hour": 21,
@@ -141,8 +146,11 @@ def load_config():
     if "auto_update" not in g_config:
         g_config["auto_update"] = {
             "enabled": True,
-            "last_check_time": None
+            "last_check_time": None,
+            "check_interval_minutes": 10
         }
+    elif "check_interval_minutes" not in g_config["auto_update"]:
+        g_config["auto_update"]["check_interval_minutes"] = 10
 
     # 可信线上时间配置
     if "trusted_time" not in g_config:

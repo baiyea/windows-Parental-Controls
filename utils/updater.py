@@ -7,6 +7,8 @@ import urllib.request
 import urllib.error
 import re
 import subprocess
+import threading
+import time
 from typing import Optional
 import config
 from utils import get_logger
@@ -14,6 +16,7 @@ from utils import get_logger
 logger = get_logger(__name__)
 
 GITEE_API_URL = "https://gitee.com/api/v5/repos/degao/parental-control/releases/latest"
+DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS = 10 * 60
 
 
 def get_update_dir() -> str:
@@ -41,6 +44,15 @@ def parse_version(version_str: str) -> tuple:
 def normalize_version_for_filename(version_str: str) -> str:
     """转换为打包文件名使用的版本号格式"""
     return re.sub(r'\.0+([0-9])', r'.\1', version_str.lstrip('v'))
+
+
+def find_pending_update() -> Optional[str]:
+    """查找已经下载但尚未应用的更新包。"""
+    update_dir = get_update_dir()
+    for f in os.listdir(update_dir):
+        if re.fullmatch(r"ParentControl\.windows\.\d+(?:\.\d+)*\.exe", f):
+            return os.path.join(update_dir, f)
+    return None
 
 
 def check_for_update() -> tuple[bool, Optional[str], Optional[str]]:
@@ -157,14 +169,7 @@ def apply_pending_update() -> bool:
     """应用待更新的 exe
     返回: 是否成功应用更新
     """
-    update_dir = get_update_dir()
-
-    # 查找匹配 ParentControl.windows.*.exe 的文件
-    new_exe = None
-    for f in os.listdir(update_dir):
-        if re.fullmatch(r"ParentControl\.windows\.\d+(?:\.\d+)*\.exe", f):
-            new_exe = os.path.join(update_dir, f)
-            break
+    new_exe = find_pending_update()
 
     if not new_exe:
         logger.info("没有待更新的文件")
@@ -218,6 +223,22 @@ start "" "{current_exe}"
         return False
 
 
+def check_and_download_update():
+    """检查并下载更新包，但不应用更新。"""
+    if find_pending_update():
+        logger.info("已有待应用更新包，跳过本次下载")
+        return "download_pending"
+
+    has_update, download_url, latest_version = check_for_update()
+    if has_update and download_url and latest_version:
+        downloaded = download_update(download_url, latest_version)
+        if downloaded:
+            logger.info("更新包已下载，请重启应用以完成更新")
+            return "download_complete"
+
+    return None
+
+
 def run_auto_update():
     """执行自动更新流程"""
     # 1. 先检查并应用待更新
@@ -225,13 +246,48 @@ def run_auto_update():
         logger.info("已应用上次的更新")
         return "update_applied"
 
-    # 2. 检查新版本
-    has_update, download_url, latest_version = check_for_update()
-    if has_update and download_url and latest_version:
-        # 3. 下载更新包
-        downloaded = download_update(download_url, latest_version)
-        if downloaded:
-            logger.info("更新包已下载，请重启应用以完成更新")
-            return "download_complete"
+    return check_and_download_update()
 
-    return None
+
+def get_update_check_interval_seconds() -> int:
+    """读取自动更新轮询间隔。"""
+    auto_update = config.g_config.get("auto_update", {}) if config.g_config else {}
+    minutes = auto_update.get("check_interval_minutes", 10)
+    try:
+        return max(1, int(minutes)) * 60
+    except (TypeError, ValueError):
+        return DEFAULT_UPDATE_CHECK_INTERVAL_SECONDS
+
+
+def periodic_update_check_loop(interval_seconds: Optional[int] = None, stop_event=None):
+    """后台定时检查更新。运行中只下载更新，不直接应用。"""
+    if interval_seconds is None:
+        interval_seconds = get_update_check_interval_seconds()
+
+    logger.info(f"自动更新后台检查已启动，间隔 {interval_seconds // 60} 分钟")
+    while True:
+        if stop_event is None:
+            time.sleep(interval_seconds)
+        elif stop_event.wait(interval_seconds):
+            return
+
+        try:
+            check_and_download_update()
+        except Exception as e:
+            logger.error(f"后台检查更新失败: {e}")
+
+
+def start_periodic_update_check(interval_seconds: Optional[int] = None):
+    """启动后台自动更新检查线程。"""
+    auto_update = config.g_config.get("auto_update", {}) if config.g_config else {}
+    if not auto_update.get("enabled", True):
+        logger.info("自动更新已禁用，不启动后台检查")
+        return None
+
+    thread = threading.Thread(
+        target=periodic_update_check_loop,
+        kwargs={"interval_seconds": interval_seconds},
+        daemon=True,
+    )
+    thread.start()
+    return thread

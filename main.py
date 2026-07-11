@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from config import load_config
-from utils.updater import run_auto_update
+from utils.updater import run_auto_update, start_periodic_update_check
 from platform import SingleInstance, add_to_startup
 from core import ParentControl
 from utils import setup_logger, get_logger
@@ -43,6 +43,7 @@ def main():
         sys.exit(0)
 
     logger.info("单实例锁检查通过")
+    start_periodic_update_check()
     logger.info("家长控制启动...")
     app = ParentControl()
     app.start()
