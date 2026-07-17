@@ -6,6 +6,8 @@
 
 现有 `KeyInterceptor` 只拦截 Win 键按下消息，没有覆盖 Win 键释放和系统按键消息，存在开始菜单在释放阶段被触发的风险。
 
+2026-07-17 反馈：`1.7.19` 锁屏期间可能出现 Windows “未响应”弹窗。原因指向焦点守护过于激进：`<FocusOut>` 事件里同步执行 `focus_force()`，可能和 Windows 焦点切换形成事件风暴，导致 Tk 主线程一段时间无法处理消息。
+
 ## 处理方式
 
 1. 在 `LockScreen` 内增加焦点守护：
@@ -13,9 +15,12 @@
    - 调用 `lift()`、`focus_force()` 和密码输入框 `focus_force()`。
    - 监听 `<FocusOut>` 和 `<Visibility>` 后立即拉回锁屏窗口。
    - 使用调度标记保证只保留一个守护循环，避免重复 `after()` 堆积。
+   - 2026-07-17 调整为每 1000ms 守护一次；失焦/可见性事件只安排 100ms 后的异步恢复，不在事件回调内同步抢焦点。
+   - 恢复动作使用 `fullscreen`、`topmost`、`deiconify()`、`lift()` 和输入框 `focus_set()`，避免反复 `focus_force()` 导致窗口未响应。
 2. 扩展键盘拦截：
    - 同时拦截 `WM_KEYDOWN`、`WM_KEYUP`、`WM_SYSKEYDOWN`、`WM_SYSKEYUP`。
    - 左右 Win 键在按下和释放阶段都返回 `1` 阻止传递。
+   - 2026-07-17 移除钩子热路径里的 debug 日志，避免低级键盘钩子回调做额外 IO。
 3. 增加运行中自动更新检查：
    - 启动时仍先应用已下载更新包。
    - 程序运行期间每 10 分钟检查一次 Gitee Release。

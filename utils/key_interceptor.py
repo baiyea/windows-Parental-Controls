@@ -59,7 +59,6 @@ class KeyInterceptor:
 
                 # 拦截 Win 键
                 if vk_code in (self.VK_LWIN, self.VK_RWIN):
-                    _get_logger().debug("拦截到 Win 键")
                     return 1  # 返回 1 阻止按键传递
         except Exception as e:
             _get_logger().error(f"键盘钩子回调错误: {e}")

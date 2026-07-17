@@ -8,7 +8,8 @@ from utils.key_interceptor import KeyInterceptor
 class LockScreen:
     """锁屏窗口类"""
 
-    FOCUS_GUARD_INTERVAL_MS = 500
+    FOCUS_GUARD_INTERVAL_MS = 1000
+    FOCUS_RESTORE_DELAY_MS = 100
 
     def __init__(self, on_unlock_callback, is_forced=False, remaining_seconds=None):
         self.root = tk.Tk()
@@ -20,13 +21,13 @@ class LockScreen:
         self.on_unlock = on_unlock_callback
         self.is_forced = is_forced  # 是否强制锁屏（用于区分正常休息）
         self.closed = False
-        self._focus_guard_scheduled = False
+        self._focus_guard_after_id = None
 
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         self.root.bind('<Alt-F4>', lambda e: 'break')
         self.root.bind('<Escape>', lambda e: 'break')
-        self.root.bind('<FocusOut>', self.enforce_lock_focus)
-        self.root.bind('<Visibility>', self.enforce_lock_focus)
+        self.root.bind('<FocusOut>', self.request_focus_guard)
+        self.root.bind('<Visibility>', self.request_focus_guard)
 
         frame = tk.Frame(self.root, bg='#1a1a2e')
         frame.place(relx=0.5, rely=0.5, anchor='center')
@@ -74,6 +75,10 @@ class LockScreen:
         self.update_timer()
         self.enforce_lock_focus()
 
+    def request_focus_guard(self, _event=None):
+        """窗口状态变化后，延迟拉回锁屏窗口，避免同步焦点事件风暴。"""
+        self._schedule_focus_guard(self.FOCUS_RESTORE_DELAY_MS)
+
     def enforce_lock_focus(self, _event=None):
         """持续把锁屏窗口拉回最前，避免被开始菜单或浏览器盖住。"""
         if self.closed:
@@ -82,25 +87,31 @@ class LockScreen:
         try:
             self.root.attributes('-fullscreen', True)
             self.root.attributes('-topmost', True)
+            self.root.deiconify()
             self.root.lift()
-            self.root.focus_force()
-            self.pwd_entry.focus_force()
+            self.pwd_entry.focus_set()
         except tk.TclError:
             return
 
-        self._schedule_focus_guard()
+        self._schedule_focus_guard(self.FOCUS_GUARD_INTERVAL_MS)
 
-    def _schedule_focus_guard(self):
-        if self.closed or self._focus_guard_scheduled:
+    def _schedule_focus_guard(self, delay_ms):
+        if self.closed:
             return
+        if self._focus_guard_after_id is not None:
+            try:
+                self.root.after_cancel(self._focus_guard_after_id)
+            except tk.TclError:
+                pass
+            self._focus_guard_after_id = None
+
         try:
-            self._focus_guard_scheduled = True
-            self.root.after(self.FOCUS_GUARD_INTERVAL_MS, self._run_focus_guard)
+            self._focus_guard_after_id = self.root.after(delay_ms, self._run_focus_guard)
         except tk.TclError:
-            self._focus_guard_scheduled = False
+            self._focus_guard_after_id = None
 
     def _run_focus_guard(self):
-        self._focus_guard_scheduled = False
+        self._focus_guard_after_id = None
         self.enforce_lock_focus()
 
     def update_timer(self):
@@ -143,6 +154,12 @@ class LockScreen:
         if self.closed:
             return
         self.closed = True
+        if self._focus_guard_after_id is not None:
+            try:
+                self.root.after_cancel(self._focus_guard_after_id)
+            except tk.TclError:
+                pass
+            self._focus_guard_after_id = None
         self.key_interceptor.stop()
         try:
             self.root.destroy()
