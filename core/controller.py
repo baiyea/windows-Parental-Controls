@@ -1,6 +1,7 @@
 """主控制器模块"""
 import threading
 import time
+import subprocess
 from datetime import datetime, timedelta
 
 import pystray
@@ -56,6 +57,7 @@ class ParentControl:
         self.remind_shown = False
         self.timer = None
         self.last_trusted_sync_monotonic = None
+        self.restart_scheduled = False
 
         # 初始化状态机
         self.state_machine = StateMachine(AppState.IDLE)
@@ -107,6 +109,14 @@ class ParentControl:
         sm.add_transition(StateTransition(
             from_state=AppState.WORKING,
             event=AppEvent.FORCE_LOCK,
+            to_state=AppState.LOCKED,
+            action=self._lock_screen
+        ))
+
+        # WORKING -> LOCKED (工作时间到，兼容未进入提醒阶段的场景)
+        sm.add_transition(StateTransition(
+            from_state=AppState.WORKING,
+            event=AppEvent.WORK_TIME_UP,
             to_state=AppState.LOCKED,
             action=self._lock_screen
         ))
@@ -409,11 +419,37 @@ class ParentControl:
         except Exception:
             pass
 
-        # 锁屏后立即重启计算机
-        if config.g_config.get('auto_restart_after_lock', False):
-            import subprocess
-            subprocess.run(['shutdown', '/r', '/t', '0', '/f'], check=False)
-            logger.info("正在强制重启计算机")
+        if self._should_restart_after_lock(kwargs):
+            self._restart_computer()
+
+    def _should_restart_after_lock(self, lock_kwargs) -> bool:
+        """判断本次锁屏后是否需要重启计算机。"""
+        if config.g_config.get("debug_mode", False):
+            return False
+        if config.g_config.get("auto_restart_after_lock", False):
+            return True
+        return bool(lock_kwargs.get("work_time_up") and config.g_config.get("auto_restart_on_work_time_up", True))
+
+    def _restart_computer(self):
+        """执行 Windows 延迟强制重启。"""
+        delay_seconds = self._get_restart_delay_seconds()
+        subprocess.run(['shutdown', '/r', '/t', str(delay_seconds), '/f'], check=False)
+        self.restart_scheduled = True
+        logger.info(f"已安排 {delay_seconds} 秒后强制重启计算机")
+
+    def _get_restart_delay_seconds(self) -> int:
+        try:
+            return max(0, int(config.g_config.get("auto_restart_delay_seconds", 180)))
+        except (TypeError, ValueError):
+            return 180
+
+    def _cancel_scheduled_restart(self):
+        """取消 Windows 已安排的重启。"""
+        if not self.restart_scheduled:
+            return
+        subprocess.run(['shutdown', '/a'], check=False)
+        self.restart_scheduled = False
+        logger.info("已取消计划中的计算机重启")
 
     def _show_debug_lock_notice(self, is_night_restrict: bool, remaining_seconds):
         """调试模式下只提示，不显示真实锁屏窗口。"""
@@ -460,6 +496,7 @@ class ParentControl:
         self.running = False
         if self.timer:
             self.timer.cancel()
+        self._cancel_scheduled_restart()
         logger.info("程序退出")
 
     def _on_unlock_callback(self):
@@ -494,6 +531,7 @@ class ParentControl:
 
     def _on_exit_locked(self, **kwargs):
         """离开锁屏状态"""
+        self._cancel_scheduled_restart()
         if hasattr(self.lock_manager, "close_lock"):
             self.lock_manager.close_lock()
         config.g_config["break_end_time"] = None
@@ -599,7 +637,7 @@ class ParentControl:
                 
                 # 检查工作时间是否到
                 if self.work_end_time and now >= self.work_end_time:
-                    self.state_machine.trigger(AppEvent.WORK_TIME_UP)
+                    self.state_machine.trigger(AppEvent.WORK_TIME_UP, work_time_up=True)
                     time.sleep(2)
                     
             elif current_state == AppState.LOCKED:

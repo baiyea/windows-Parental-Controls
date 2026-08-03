@@ -65,6 +65,8 @@ def load_config():
         "work_end_time": None,
         "remind_before_minutes": 5,
         "auto_restart_after_lock": False,
+        "auto_restart_on_work_time_up": True,
+        "auto_restart_delay_seconds": 180,
         "debug_mode": False,
         "auto_update": {
             "enabled": True,
@@ -126,6 +128,11 @@ def load_config():
     # 调试模式：进入锁屏状态但不显示真实锁屏窗口
     if "debug_mode" not in g_config:
         g_config["debug_mode"] = False
+    # 工作时间自然到点后是否自动重启
+    if "auto_restart_on_work_time_up" not in g_config:
+        g_config["auto_restart_on_work_time_up"] = True
+    if "auto_restart_delay_seconds" not in g_config:
+        g_config["auto_restart_delay_seconds"] = 180
     # 夜间限制配置
     if "restrict_night_hours" not in g_config:
         g_config["restrict_night_hours"] = {

@@ -48,6 +48,8 @@ class LockScreenFlowTest(unittest.TestCase):
             "break_end_time": None,
             "remind_before_minutes": 5,
             "auto_restart_after_lock": False,
+            "auto_restart_on_work_time_up": True,
+            "auto_restart_delay_seconds": 180,
             "debug_mode": False,
             "restrict_night_hours": {
                 "enabled": False,
@@ -99,6 +101,95 @@ class LockScreenFlowTest(unittest.TestCase):
         self.assertEqual(CapturingThread.created, [])
         self.assertEqual(control.break_end_time, now + timedelta(minutes=30))
         notify_mock.assert_called_once()
+
+    def test_work_time_up_lock_restarts_computer_after_saving_break_time(self):
+        now = datetime(2026, 7, 5, 14, 0, 0)
+        control = ParentControl()
+        control.state_machine.current_state = AppState.REMINDING
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config") as save_mock,
+            patch.object(controller_module.threading, "Thread", CapturingThread),
+            patch.object(controller_module.winsound, "PlaySound"),
+            patch.object(controller_module.subprocess, "run") as run_mock,
+        ):
+            control.state_machine.trigger(AppEvent.WORK_TIME_UP, work_time_up=True)
+
+        self.assertEqual(control.state_machine.get_state(), AppState.LOCKED)
+        self.assertEqual(config.g_config["break_end_time"], "2026-07-05 14:30:00")
+        save_mock.assert_called()
+        run_mock.assert_called_once_with(['shutdown', '/r', '/t', '180', '/f'], check=False)
+        self.assertTrue(control.restart_scheduled)
+
+    def test_leaving_lock_cancels_scheduled_restart(self):
+        now = datetime(2026, 7, 5, 14, 30, 0)
+        control = ParentControl()
+        fake_lock_manager = FakeLockManager()
+        control.lock_manager = fake_lock_manager
+        control.break_end_time = now
+        control.restart_scheduled = True
+        control.state_machine.current_state = AppState.LOCKED
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config"),
+            patch.object(controller_module.subprocess, "run") as run_mock,
+        ):
+            control.state_machine.trigger(AppEvent.BREAK_TIME_UP)
+
+        self.assertFalse(control.restart_scheduled)
+        run_mock.assert_called_once_with(['shutdown', '/a'], check=False)
+
+    def test_manual_lock_does_not_use_work_time_up_restart(self):
+        now = datetime(2026, 7, 5, 14, 0, 0)
+        control = ParentControl()
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config"),
+            patch.object(controller_module.threading, "Thread", CapturingThread),
+            patch.object(controller_module.winsound, "PlaySound"),
+            patch.object(controller_module.subprocess, "run") as run_mock,
+        ):
+            control._lock_screen(forced=True)
+
+        run_mock.assert_not_called()
+
+    def test_work_time_up_restart_can_be_disabled(self):
+        now = datetime(2026, 7, 5, 14, 0, 0)
+        config.g_config["auto_restart_on_work_time_up"] = False
+        control = ParentControl()
+        control.state_machine.current_state = AppState.WORKING
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config"),
+            patch.object(controller_module.threading, "Thread", CapturingThread),
+            patch.object(controller_module.winsound, "PlaySound"),
+            patch.object(controller_module.subprocess, "run") as run_mock,
+        ):
+            control.state_machine.trigger(AppEvent.WORK_TIME_UP, work_time_up=True)
+
+        self.assertEqual(control.state_machine.get_state(), AppState.LOCKED)
+        run_mock.assert_not_called()
+
+    def test_debug_mode_suppresses_work_time_up_restart(self):
+        now = datetime(2026, 7, 5, 14, 0, 0)
+        config.g_config["debug_mode"] = True
+        control = ParentControl()
+
+        with (
+            patch.object(control, "_now", return_value=now),
+            patch.object(config, "save_config"),
+            patch.object(controller_module.threading, "Thread", CapturingThread),
+            patch.object(controller_module.notification, "notify"),
+            patch.object(controller_module.winsound, "PlaySound"),
+            patch.object(controller_module.subprocess, "run") as run_mock,
+        ):
+            control._lock_screen(work_time_up=True)
+
+        run_mock.assert_not_called()
 
     def test_break_time_transition_closes_lock_screen(self):
         now = datetime(2026, 7, 5, 14, 30, 0)
